@@ -87,6 +87,7 @@ export function normalizeHealthPayload(body) {
   const sleepHours = sumSleepHours(findMetric(metrics, 'sleep_analysis'));
   const steps = sumQty(findMetric(metrics, 'step_count'));
   const restingHR = latestValue(findMetric(metrics, 'resting_heart_rate'), ['Avg', 'qty', 'value']);
+  const heartRate = latestValue(findMetricAny(metrics, ['heart_rate', 'walking_heart_rate_average']), ['Avg', 'qty', 'value']);
   const activeEnergyKcal = sumQty(findMetric(metrics, 'active_energy'));
   const dietaryEnergyKcal = sumQty(findMetricAny(metrics, ['dietary_energy', 'dietary_energy_consumed']));
   const proteinG = sumQty(findMetricAny(metrics, ['protein', 'dietary_protein']));
@@ -109,6 +110,7 @@ export function normalizeHealthPayload(body) {
     sleepHours: sleepHours != null ? Math.round(sleepHours * 10) / 10 : null,
     steps: steps != null ? Math.round(steps) : null,
     restingHR: restingHR != null ? Math.round(restingHR) : null,
+    heartRate: heartRate != null ? Math.round(heartRate) : null,
     activeEnergyKcal: activeEnergyKcal != null ? Math.round(activeEnergyKcal) : null,
     dietaryEnergyKcal: dietaryEnergyKcal != null ? Math.round(dietaryEnergyKcal) : null,
     proteinG: proteinG != null ? Math.round(proteinG) : null,

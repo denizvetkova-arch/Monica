@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0"
+    "@supabase/supabase-js": "^2.45.0",
+    "@anthropic-ai/sdk": "^0.70.0"
   },
   "engines": {
     "node": ">=18"

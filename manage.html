@@ -147,8 +147,26 @@ body::after {
   font-family: inherit; font-size: 12px; outline: none;
 }
 .task-fields select option { background: #0e0e10; }
-.task-fields .f-importance, .task-fields .f-minutes { width: 62px; }
+.task-fields .f-roi, .task-fields .f-urgency, .task-fields .f-difficulty, .task-fields .f-minutes { width: 46px; }
+.task-fields .f-schoolclass { width: 140px; }
 .task-fields .f-deadline { width: 168px; }
+.f-mini-group {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 7px 2px 2px;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+  background: rgba(0,0,0,0.28);
+}
+.f-mini-group input {
+  border: 0 !important; background: transparent !important; padding: 4px 0 !important;
+}
+.f-mini-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-tertiary); padding-left: 7px;
+}
+.classifying-tag {
+  font-size: 10.5px; color: var(--text-tertiary); font-style: italic;
+  flex-shrink: 0; align-self: center;
+}
 
 .empty-hint { text-align: center; font-size: 13px; color: var(--text-tertiary); padding: 20px 0; }
 .list-count { font-size: 12px; color: var(--text-tertiary); margin-bottom: 12px; }
@@ -169,7 +187,7 @@ body::after {
   <div class="card">
     <div class="section-title">Bulk Add</div>
     <textarea class="bulk-textarea" id="bulkInput" placeholder="Paste your whole to-do list here, one task per line…"></textarea>
-    <div class="bulk-hint">Each line becomes a task (importance 3, medium energy, no deadline). Refine the ones that matter below.</div>
+    <div class="bulk-hint">Each line becomes a task — AI classifies category, ROI, urgency, difficulty, and estimated time automatically (a few seconds per task). Refine any of it below if it's wrong.</div>
     <button class="btn-primary" id="bulkAddBtn" type="button">Add All Lines</button>
   </div>
 
@@ -186,7 +204,14 @@ body::after {
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const CATEGORY_EMOJI = { lab: '🧪', school: '📚', debate: '🎤', health: '💊', money: '💰', admin: '🗂️', personal: '🌱' };
+  const CATEGORY_EMOJI = { career: '💼', school: '📚', debate: '🎤', glp1_research: '🧪', finance: '💰', personal: '🌱', extracurricular: '🎯', health: '💊' };
+
+  // In-memory only (not persisted) — tracks which tasks currently have a
+  // classify-task.js request in flight, purely so the row can show a
+  // "Classifying…" tag. task.classified (persisted) means "AI has filled
+  // these fields in"; this Set means "still waiting on that right now."
+  const classifyingIds = new Set();
+  const CLASSIFY_CONCURRENCY = 5;
 
   function whenTasksReady(fn) {
     if (window.Tasks) { fn(); return; }
@@ -201,6 +226,30 @@ body::after {
     const d = new Date(iso);
     const pad = (n) => String(n).padStart(2, '0');
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  // Small "LABEL [input]" control used for ROI/urgency/difficulty — bare
+  // number inputs of the same size next to each other are indistinguishable
+  // without this.
+  function miniNumberField(labelText, value, min, max, className, titleText, onChange) {
+    const wrap = document.createElement('span');
+    wrap.className = 'f-mini-group';
+    const label = document.createElement('span');
+    label.className = 'f-mini-label';
+    label.textContent = labelText;
+    wrap.appendChild(label);
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = min; input.max = max;
+    input.className = className;
+    input.title = titleText;
+    input.value = value;
+    input.addEventListener('change', () => {
+      const v = Math.min(max, Math.max(min, parseInt(input.value, 10) || value));
+      input.value = v;
+      onChange(v);
+    });
+    wrap.appendChild(input);
+    return wrap;
   }
 
   function buildRow(task) {
@@ -247,6 +296,13 @@ body::after {
     });
     top.appendChild(title);
 
+    if (classifyingIds.has(task.id)) {
+      const tag = document.createElement('span');
+      tag.className = 'classifying-tag';
+      tag.textContent = 'Classifying…';
+      top.appendChild(tag);
+    }
+
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'task-delete';
@@ -267,11 +323,26 @@ body::after {
     window.Tasks.CATEGORIES.forEach(c => {
       const opt = document.createElement('option');
       opt.value = c; opt.textContent = (CATEGORY_EMOJI[c] || '') + ' ' + c;
-      if (c === task.category) opt.selected = true;
+      if (c === task.lifeDomain) opt.selected = true;
       catSelect.appendChild(opt);
     });
-    catSelect.addEventListener('change', () => window.Tasks.updateTask(task.id, { category: catSelect.value }));
     fields.appendChild(catSelect);
+
+    const classInput = document.createElement('input');
+    classInput.type = 'text';
+    classInput.className = 'f-schoolclass';
+    classInput.placeholder = 'Which class?';
+    classInput.value = task.schoolClass || '';
+    classInput.style.display = task.lifeDomain === 'school' ? '' : 'none';
+    classInput.addEventListener('change', () => {
+      window.Tasks.updateTask(task.id, { schoolClass: classInput.value.trim() || null });
+    });
+    fields.appendChild(classInput);
+
+    catSelect.addEventListener('change', () => {
+      window.Tasks.updateTask(task.id, { lifeDomain: catSelect.value });
+      classInput.style.display = catSelect.value === 'school' ? '' : 'none';
+    });
 
     const energySelect = document.createElement('select');
     window.Tasks.ENERGY_LEVELS.forEach(lvl => {
@@ -283,29 +354,14 @@ body::after {
     energySelect.addEventListener('change', () => window.Tasks.updateTask(task.id, { energyLevel: energySelect.value }));
     fields.appendChild(energySelect);
 
-    const impInput = document.createElement('input');
-    impInput.type = 'number'; impInput.min = 1; impInput.max = 5;
-    impInput.className = 'f-importance';
-    impInput.title = 'Importance (1-5)';
-    impInput.value = task.importance;
-    impInput.addEventListener('change', () => {
-      const v = Math.min(5, Math.max(1, parseInt(impInput.value, 10) || 3));
-      impInput.value = v;
-      window.Tasks.updateTask(task.id, { importance: v });
-    });
-    fields.appendChild(impInput);
-
-    const minInput = document.createElement('input');
-    minInput.type = 'number'; minInput.min = 1;
-    minInput.className = 'f-minutes';
-    minInput.title = 'Estimated minutes';
-    minInput.value = task.estimatedMinutes;
-    minInput.addEventListener('change', () => {
-      const v = Math.max(1, parseInt(minInput.value, 10) || 30);
-      minInput.value = v;
-      window.Tasks.updateTask(task.id, { estimatedMinutes: v });
-    });
-    fields.appendChild(minInput);
+    fields.appendChild(miniNumberField('ROI', task.longTermROI, 1, 10, 'f-roi', 'Long-term ROI (1-10)',
+      (v) => window.Tasks.updateTask(task.id, { longTermROI: v })));
+    fields.appendChild(miniNumberField('Urg', task.urgency, 1, 10, 'f-urgency', 'Urgency (1-10)',
+      (v) => window.Tasks.updateTask(task.id, { urgency: v })));
+    fields.appendChild(miniNumberField('Diff', task.difficulty, 1, 10, 'f-difficulty', 'Difficulty (1-10)',
+      (v) => window.Tasks.updateTask(task.id, { difficulty: v })));
+    fields.appendChild(miniNumberField('Min', task.estimatedMinutes, 1, 480, 'f-minutes', 'Estimated minutes',
+      (v) => window.Tasks.updateTask(task.id, { estimatedMinutes: v })));
 
     const dlInput = document.createElement('input');
     dlInput.type = 'datetime-local';
@@ -335,12 +391,52 @@ body::after {
     $('listCount').textContent = all.length === 0 ? '' : (all.length === 1 ? '1 open task' : all.length + ' open tasks');
   }
 
+  // Fire-and-forget classification for one task — always resolves (never
+  // rejects), always ends by clearing classifyingIds and re-rendering, so a
+  // slow or failed classification just leaves the task on its defaults
+  // instead of blocking anything.
+  async function classifyOne(id, title) {
+    classifyingIds.add(id);
+    renderList();
+    try {
+      const r = await fetch('/api/classify-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      const data = await r.json();
+      if (data && data.ok && data.classification) {
+        window.Tasks.updateTask(id, data.classification);
+      }
+    } catch (e) {
+      // leave defaults — never blocks task creation
+    } finally {
+      classifyingIds.delete(id);
+      renderList();
+    }
+  }
+
+  // Cap concurrent classify-task.js calls so pasting a "massive" list
+  // doesn't fire hundreds of simultaneous requests.
+  async function classifyQueue(items) {
+    let i = 0;
+    async function worker() {
+      while (i < items.length) {
+        const item = items[i++];
+        await classifyOne(item.id, item.title);
+      }
+    }
+    const workers = Array.from({ length: Math.min(CLASSIFY_CONCURRENCY, items.length) }, worker);
+    await Promise.all(workers);
+  }
+
   function wireBulkAdd() {
     $('bulkAddBtn').addEventListener('click', () => {
       const lines = $('bulkInput').value.split('\n').map(l => l.trim()).filter(Boolean);
-      lines.forEach(title => window.Tasks.addTask({ title }));
+      const added = lines.map(title => window.Tasks.addTask({ title }));
       $('bulkInput').value = '';
       renderList();
+      classifyQueue(added.map(t => ({ id: t.id, title: t.title })));
     });
   }
 

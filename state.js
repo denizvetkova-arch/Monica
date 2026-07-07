@@ -41,16 +41,17 @@
     const T = window.Tasks || {};
 
     const tasks = T.getTasks ? T.getTasks() : [];
-    let calendar = { connected: false, availableMinutes: null, blocks: [], events: [] };
+    let calendar = { connected: false, availableMinutes: null, blocks: [], events: [], nextEvent: null };
     try { if (T.getCalendarContext) calendar = await T.getCalendarContext(); } catch (e) {}
 
-    const productivity = T.getProductivityContext
-      ? T.getProductivityContext()
-      : { level: 'medium', score: 60, connected: false, factors: [] };
+    const productivity = T.getEnergyContext
+      ? T.getEnergyContext()
+      : { level: 'moderate', score: 60, connected: false, factors: [] };
     const nutrition = T.getNutritionContext
       ? T.getNutritionContext()
       : { connected: false, caloriesConsumed: null, caloriesTarget: null, caloriesRemaining: null, proteinG: null, carbsG: null, fatG: null, fiberG: null };
     const caffeine = T.getCaffeineContext ? T.getCaffeineContext() : { activeMg: null };
+    const streaks = T.getStreakContext ? T.getStreakContext() : { days: 0, active: false, enoughData: false };
     const health = loadJSON('health_metrics_v1', null);
 
     return {
@@ -62,6 +63,7 @@
       nutrition,
       productivity,
       caffeine,
+      streaks,
       // Reserved for future integrations — see extension contract above.
       location: null,
       weather: null,

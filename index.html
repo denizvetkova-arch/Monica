@@ -122,9 +122,16 @@ body::after {
   min-height: 33px;
 }
 @media (max-width: 480px) { .next-title { font-size: 21px; } }
+.dtn-meta-row { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; }
 .dtn-duration {
   font-family: var(--font-mono); font-size: 13px; font-weight: 600;
-  color: var(--text-secondary); margin: 0 0 18px;
+  color: var(--text-secondary);
+}
+.dtn-confidence {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: var(--success);
+  padding: 3px 9px; border-radius: 999px;
+  background: rgba(107,227,164,0.10); border: 1px solid rgba(107,227,164,0.25);
 }
 .dtn-why-label {
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
@@ -293,10 +300,17 @@ body::after {
     <div class="next-eyebrow" id="nextEyebrow">Do This Now</div>
     <div class="dtn-category" id="dtnCategory" style="display:none"></div>
     <h2 class="next-title" id="nextTitle">Loading…</h2>
-    <div class="dtn-duration" id="dtnDuration"></div>
+    <div class="dtn-meta-row">
+      <div class="dtn-duration" id="dtnDuration"></div>
+      <div class="dtn-confidence" id="dtnConfidence" style="display:none"></div>
+    </div>
     <div id="dtnWhyBlock" style="display:none">
       <div class="dtn-why-label">Why</div>
       <ul class="dtn-why-list" id="dtnWhyList"></ul>
+    </div>
+    <div id="dtnBenefitBlock" style="display:none">
+      <div class="dtn-why-label">Expected Benefit</div>
+      <ul class="dtn-why-list" id="dtnBenefitList"></ul>
     </div>
     <div class="dtn-next" id="dtnNext" style="display:none"></div>
   </div>
@@ -304,8 +318,8 @@ body::after {
   <div class="actions">
     <button class="btn-complete" id="btnComplete" type="button">Complete</button>
     <div class="actions-row">
+      <button class="btn-secondary" id="btnDelay" type="button">Delay 15 Minutes</button>
       <button class="btn-secondary" id="btnSkip" type="button">Skip</button>
-      <button class="btn-secondary" id="btnDelay" type="button">Delay 15m</button>
       <button class="btn-secondary" id="btnReplan" type="button">Replan</button>
     </div>
   </div>
@@ -434,7 +448,8 @@ body::after {
   'use strict';
   const $ = (id) => document.getElementById(id);
 
-  const CATEGORY_EMOJI = { lab: '🧪', school: '📚', debate: '🎤', health: '💊', money: '💰', admin: '🗂️', personal: '🌱' };
+  const CATEGORY_EMOJI = { career: '💼', school: '📚', debate: '🎤', glp1_research: '🧪', finance: '💰', personal: '🌱', extracurricular: '🎯', health: '💊' };
+  const CATEGORY_LABEL = { career: 'career', school: 'school', debate: 'debate', glp1_research: 'GLP-1 research', finance: 'finance', personal: 'personal', extracurricular: 'extracurricular', health: 'health' };
 
   function whenTasksReady(fn) {
     if (window.DecisionEngine) { fn(); return; }
@@ -514,7 +529,7 @@ body::after {
   async function render() {
     if (!window.DecisionEngine) return;
     const result = await window.DecisionEngine.decide();
-    const { task, durationMin, reasons, nextPreview, state } = result;
+    const { task, durationMin, reasons, confidence, expectedBenefit, afterThis, state } = result;
 
     renderProductivityPill(state.productivity);
     renderCalendarList(state.calendar, state.now);
@@ -523,8 +538,11 @@ body::after {
     const categoryEl = $('dtnCategory');
     const titleEl = $('nextTitle');
     const durationEl = $('dtnDuration');
+    const confidenceEl = $('dtnConfidence');
     const whyBlock = $('dtnWhyBlock');
     const whyList = $('dtnWhyList');
+    const benefitBlock = $('dtnBenefitBlock');
+    const benefitList = $('dtnBenefitList');
     const nextEl = $('dtnNext');
     const completeBtn = $('btnComplete');
     const skipBtn = $('btnSkip');
@@ -534,21 +552,37 @@ body::after {
       categoryEl.style.display = 'none';
       titleEl.textContent = 'Nothing on your list';
       durationEl.textContent = '';
+      confidenceEl.style.display = 'none';
       whyBlock.style.display = 'none';
+      benefitBlock.style.display = 'none';
       nextEl.style.display = 'none';
       completeBtn.disabled = true;
       skipBtn.disabled = true;
       delayBtn.disabled = true;
     } else {
       categoryEl.style.display = '';
-      categoryEl.textContent = (CATEGORY_EMOJI[task.category] || '') + ' ' + task.category;
+      categoryEl.textContent = (CATEGORY_EMOJI[task.lifeDomain] || '') + ' ' + (CATEGORY_LABEL[task.lifeDomain] || task.lifeDomain);
       titleEl.textContent = task.title;
       durationEl.textContent = 'Duration: ' + durationMin + ' minutes';
+      if (confidence != null) {
+        confidenceEl.style.display = '';
+        confidenceEl.textContent = 'Confidence: ' + confidence + '%';
+      } else {
+        confidenceEl.style.display = 'none';
+      }
       whyBlock.style.display = reasons.length ? '' : 'none';
       whyList.innerHTML = reasons.map(r => '<li class="dtn-why-item">' + r.replace(/</g, '&lt;') + '</li>').join('');
-      if (nextPreview) {
+      if (expectedBenefit && expectedBenefit.length) {
+        benefitBlock.style.display = '';
+        benefitList.innerHTML = expectedBenefit.map(b => '<li class="dtn-why-item">' + b.replace(/</g, '&lt;') + '</li>').join('');
+      } else {
+        benefitBlock.style.display = 'none';
+      }
+      if (afterThis) {
         nextEl.style.display = '';
-        nextEl.textContent = 'Next up: ' + nextPreview.title + ' (~' + nextPreview.durationMin + ' min)';
+        nextEl.textContent = afterThis.type === 'event'
+          ? 'After this: ' + afterThis.title + ' in ' + afterThis.minutesUntil + ' min'
+          : 'Next up: ' + afterThis.title + ' (~' + afterThis.durationMin + ' min)';
       } else {
         nextEl.style.display = 'none';
       }

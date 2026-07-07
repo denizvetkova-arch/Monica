@@ -5,7 +5,7 @@
 // deadlines and must survive day rollovers).
 //
 // Exposes window.Tasks = { get, add, update, complete, skip,
-// remove, rankTasks, CATEGORIES, ENERGY_LEVELS }
+// remove, rankTasks, CATEGORIES, ENERGY_LEVELS, ... }
 //
 // Any page that wants live updates when tasks change (in this
 // tab or another) should listen for the 'tasks-changed' event.
@@ -14,7 +14,11 @@
   'use strict';
 
   const TASKS_KEY = 'tasks_v1';
-  const CATEGORIES = ['lab', 'school', 'debate', 'health', 'money', 'admin', 'personal'];
+  // Life domains, not generic "categories" — the Decision Engine reasons
+  // about these explicitly (career ROI, academic performance, etc).
+  // 'health' is added beyond the user's original 7-item list since
+  // gym/water tracking already exists in this app and needs a home.
+  const CATEGORIES = ['career', 'school', 'debate', 'glp1_research', 'finance', 'personal', 'extracurricular', 'health'];
   const ENERGY_LEVELS = ['low', 'medium', 'high'];
 
   function loadJSON(key, fallback) {
@@ -32,9 +36,36 @@
     return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
   }
 
+  // Fills in the new schema fields on any task missing them — covers both
+  // tasks created before this schema existed and tasks still awaiting
+  // classify-task.js's async result. Never destructive: existing values
+  // are always preserved.
+  function migrateTask(t) {
+    if (!t) return t;
+    const m = Object.assign({}, t);
+    if (m.lifeDomain == null) {
+      m.lifeDomain = CATEGORIES.indexOf(m.category) !== -1 ? m.category : 'personal';
+    }
+    if (m.longTermROI == null) {
+      m.longTermROI = m.importance != null ? Math.min(10, Math.round(m.importance * 2)) : 5;
+    }
+    if (m.urgency == null) m.urgency = 5;
+    if (m.difficulty == null) m.difficulty = 5;
+    if (m.schoolClass === undefined) m.schoolClass = null;
+    if (m.energyLevel == null) m.energyLevel = 'medium';
+    if (m.estimatedMinutes == null) m.estimatedMinutes = 30;
+    if (m.classified === undefined) m.classified = false;
+    return m;
+  }
+
   function getTasks() {
-    const t = loadJSON(TASKS_KEY, []);
-    return Array.isArray(t) ? t : [];
+    const raw = loadJSON(TASKS_KEY, []);
+    const list = Array.isArray(raw) ? raw : [];
+    const migrated = list.map(migrateTask);
+    // Persist the migration once so future reads/writes don't redo it —
+    // self-terminating (next call sees already-migrated data, no diff).
+    if (JSON.stringify(migrated) !== JSON.stringify(list)) setTasks(migrated);
+    return migrated;
   }
   function setTasks(list) { saveJSON(TASKS_KEY, list); }
 
@@ -45,13 +76,19 @@
       title: (partial.title || '').trim(),
       deadline: partial.deadline || null,
       estimatedMinutes: partial.estimatedMinutes != null ? Number(partial.estimatedMinutes) : 30,
-      importance: partial.importance != null ? Number(partial.importance) : 3,
-      category: CATEGORIES.indexOf(partial.category) !== -1 ? partial.category : 'personal',
+      longTermROI: partial.longTermROI != null ? Number(partial.longTermROI) : 5,
+      urgency: partial.urgency != null ? Number(partial.urgency) : 5,
+      difficulty: partial.difficulty != null ? Number(partial.difficulty) : 5,
+      lifeDomain: CATEGORIES.indexOf(partial.lifeDomain) !== -1 ? partial.lifeDomain : 'personal',
+      schoolClass: partial.schoolClass || null,
       energyLevel: ENERGY_LEVELS.indexOf(partial.energyLevel) !== -1 ? partial.energyLevel : 'medium',
       done: false,
       createdAt: Date.now(),
       completedAt: null,
       snoozedUntil: null,
+      // True once classify-task.js has filled in the fields above from the
+      // title — false means the row is still showing inferred defaults.
+      classified: !!partial.classified,
     };
     list.push(task);
     setTasks(list);
@@ -67,8 +104,31 @@
     return list[idx];
   }
 
+  // ---------- Completion history ----------
+  // Append-only, capped log used for the (currently neutral-until-enough-
+  // data) historical-productivity signal in the Decision Engine — see
+  // getStreakContext() below.
+  const COMPLETIONS_KEY = 'task_completions_v1';
+  const COMPLETIONS_CAP = 200;
+
+  function logCompletion(task, now) {
+    const log = loadJSON(COMPLETIONS_KEY, []);
+    const list = Array.isArray(log) ? log : [];
+    list.push({
+      lifeDomain: task.lifeDomain,
+      hour: new Date(now).getHours(),
+      dayOfWeek: new Date(now).getDay(),
+      completedAt: now,
+    });
+    while (list.length > COMPLETIONS_CAP) list.shift();
+    try { localStorage.setItem(COMPLETIONS_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
   function completeTask(id) {
-    return updateTask(id, { done: true, completedAt: Date.now() });
+    const now = Date.now();
+    const task = updateTask(id, { done: true, completedAt: now });
+    if (task) logCompletion(task, now);
+    return task;
   }
 
   // Snooze a task out of ranking contention for a while — this is what
@@ -83,22 +143,62 @@
     setTasks(list);
   }
 
+  function dayKey(now) {
+    const d = new Date(now);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  // Consecutive days (including today, if it already has a completion)
+  // with at least one completed task. Reported as "not enough history yet"
+  // until ~14 distinct days of data exist, rather than drawing conclusions
+  // from a handful of days — see getStreakContext().
+  function getStreakContext() {
+    const log = loadJSON(COMPLETIONS_KEY, []);
+    const list = Array.isArray(log) ? log : [];
+    const days = new Set(list.map(e => dayKey(e.completedAt)));
+    if (days.size < 14) return { days: 0, active: false, enoughData: false };
+    let streak = 0;
+    let cursor = Date.now();
+    while (days.has(dayKey(cursor))) {
+      streak += 1;
+      cursor -= 86400000;
+    }
+    return { days: streak, active: streak > 0, enoughData: true };
+  }
+
   // ---------- Deterministic "next best task" scorer ----------
   // Degrades gracefully: with no deadline/calendar/health data, every
   // task still gets scored via neutral defaults, so this works fully
   // standalone before Calendar/Health integrations exist.
-  function urgencyScore(deadline, now) {
-    if (!deadline) return 0.10;
-    const hoursLeft = (new Date(deadline).getTime() - now) / 3600000;
-    if (hoursLeft <= 0) return 1.0;
-    if (hoursLeft >= 24 * 14) return 0.05;
-    return Math.max(0.05, 1 - hoursLeft / (24 * 14));
+  //
+  // Urgency blends two signals: the classic deadline-proximity ramp, and
+  // task.urgency — an LLM-inferred "this inherently matters regardless of
+  // a deadline" signal (e.g. "reply to urgent email" has no deadline but
+  // shouldn't rank like a someday-task). Deadline dominates when present;
+  // stored urgency provides a floor otherwise.
+  function urgencyScore(task, now) {
+    let deadlineUrgency = 0.10;
+    if (task.deadline) {
+      const hoursLeft = (new Date(task.deadline).getTime() - now) / 3600000;
+      if (hoursLeft <= 0) deadlineUrgency = 1.0;
+      else if (hoursLeft >= 24 * 14) deadlineUrgency = 0.05;
+      else deadlineUrgency = Math.max(0.05, 1 - hoursLeft / (24 * 14));
+    }
+    const storedUrgency = (task.urgency != null ? task.urgency : 5) / 10;
+    return Math.max(deadlineUrgency, storedUrgency * 0.7);
   }
+  // required: task's energyLevel ('low'|'medium'|'high').
+  // current: the Adaptive Energy Model's 5-level label, or (for backward
+  // compatibility) an old 3-level one — both map onto the same 1-3 scale.
   function energyFit(required, current) {
     if (!current) return 0.6;
-    const lvl = { low: 1, medium: 2, high: 3 };
-    const diff = Math.abs((lvl[required] || 2) - (lvl[current] || 2));
-    return diff === 0 ? 1.0 : diff === 1 ? 0.55 : 0.15;
+    const reqLvl = { low: 1, medium: 2, high: 3 }[required] || 2;
+    const curLvl = { very_low: 1, low: 1.5, moderate: 2, high: 2.5, peak: 3 }[current];
+    if (curLvl == null) return 0.6;
+    const diff = Math.abs(reqLvl - curLvl);
+    if (diff <= 0.25) return 1.0;
+    if (diff <= 1) return 0.55;
+    return 0.15;
   }
   function timeFit(estMin, availMin) {
     if (availMin == null) return 0.5;
@@ -109,8 +209,8 @@
   function scoreTask(task, ctx) {
     if (task.done) return -Infinity;
     if (task.snoozedUntil && ctx.now < task.snoozedUntil) return -Infinity;
-    return 35 * urgencyScore(task.deadline, ctx.now)
-         + 35 * (task.importance / 5)
+    return 35 * urgencyScore(task, ctx.now)
+         + 35 * (task.longTermROI / 10)
          + 20 * energyFit(task.energyLevel, ctx.currentEnergy)
          + 10 * timeFit(task.estimatedMinutes, ctx.availableMinutes);
   }
@@ -132,6 +232,7 @@
   // (WAKE_HOUR=8, SLEEP_HOUR=24) so "today" means the same thing app-wide.
   const CAL_DAY_START_HOUR = 8;
   const CAL_DAY_END_HOUR = 24;
+  const CAL_LOOKAHEAD_DAYS = 3;
 
   function getGcalTokens() { return loadJSON(GCAL_KEY, null); }
   function setGcalTokens(t) { try { localStorage.setItem(GCAL_KEY, JSON.stringify(t)); } catch (e) {} }
@@ -238,24 +339,29 @@
       .filter(ev => ev.start);
   }
 
-  // Fetches today's events and returns { connected, availableMinutes, blocks, events }.
-  // Degrades to { connected: false, availableMinutes: null, blocks: [], events: [] }
-  // when not connected, offline, or the token can't be refreshed — callers should
-  // treat that identically to "Calendar not integrated yet" (Stage 0 behavior).
+  // Fetches events from now through today's end AND a few days further out
+  // in one call — the wider window answers "what's my next commitment"
+  // (e.g. "engineering deadline tomorrow") while free/busy math still only
+  // looks at today. Returns { connected, availableMinutes, blocks, events,
+  // nextEvent }. Degrades to a fully-null/empty shape when not connected,
+  // offline, or the token can't be refreshed — callers should treat that
+  // identically to "Calendar not integrated yet."
   async function getCalendarContext() {
+    const EMPTY = { connected: false, availableMinutes: null, blocks: [], events: [], nextEvent: null };
     let t = getGcalTokens();
-    if (!t || !t.access) return { connected: false, availableMinutes: null, blocks: [], events: [] };
+    if (!t || !t.access) return EMPTY;
     if (t.expires && Date.now() > t.expires - 60000) {
       const n = await gcalRefresh(t);
-      if (n) t = n; else return { connected: false, availableMinutes: null, blocks: [], events: [] };
+      if (n) t = n; else return EMPTY;
     }
     const now = new Date();
     const dayStart = new Date(now); dayStart.setHours(CAL_DAY_START_HOUR, 0, 0, 0);
     const dayEnd = new Date(now); dayEnd.setHours(CAL_DAY_END_HOUR, 0, 0, 0);
+    const lookaheadEnd = new Date(now.getTime() + CAL_LOOKAHEAD_DAYS * 86400000);
     try {
       const data = await gcalFetch('/calendars/primary/events', {
         timeMin: dayStart.toISOString(),
-        timeMax: dayEnd.toISOString(),
+        timeMax: lookaheadEnd.toISOString(),
         singleEvents: 'true',
         orderBy: 'startTime',
       }, t);
@@ -263,19 +369,25 @@
       const blocks = computeFreeBlocks(rawEvents, dayStart.getTime(), dayEnd.getTime(), 10);
       const availableMinutes = minutesFreeNow(blocks, Date.now());
       const events = normalizeEvents(rawEvents);
-      return { connected: true, availableMinutes, blocks, events };
+      const nowMs = Date.now();
+      const upcoming = events.find(ev => !ev.allDay && new Date(ev.start).getTime() > nowMs);
+      const nextEvent = upcoming
+        ? { title: upcoming.title, start: upcoming.start, minutesUntil: Math.round((new Date(upcoming.start).getTime() - nowMs) / 60000) }
+        : null;
+      return { connected: true, availableMinutes, blocks, events, nextEvent };
     } catch (e) {
-      return { connected: true, availableMinutes: null, blocks: [], events: [], error: true };
+      return { connected: true, availableMinutes: null, blocks: [], events: [], nextEvent: null, error: true };
     }
   }
 
-  // ---------- Productivity level ----------
+  // ---------- Adaptive Energy Model ----------
   // Blends Apple Health (via health_metrics_v1, written server-side by
-  // api/health-import.js) with caffeine (already tracked locally by
-  // caffeine.html — no new integration needed, just read its log) into a
-  // single low/medium/high energy signal for the ranking algorithm and a
-  // human-readable summary for display. Every input degrades to a neutral
-  // subscore when missing, so this works with zero, partial, or full data.
+  // api/health-import.js), hydration (po_water_v1, already tracked
+  // locally by the water tracker), and caffeine (caf:logs, already
+  // tracked locally by caffeine.html) into a 5-level energy signal for
+  // the ranking algorithm and a human-readable summary for display.
+  // Every input degrades to a neutral subscore when missing, so this
+  // works with zero, partial, or full data.
   const HEALTH_METRICS_KEY = 'health_metrics_v1';
   const CAFFEINE_LOGS_KEY = 'caf:logs';
   const CAFFEINE_ACTIVE_WINDOW_MS = 5 * 3600000; // caffeine's rough effective window
@@ -322,6 +434,34 @@
     return { score: 70, note: null };
   }
 
+  // Rough, non-personalized proxy (same spirit as the protein-pacing check
+  // in decision-engine.js): compares today's logged water-tracker entries
+  // against a flat assumed daily target, scaled by how much of the waking
+  // day has passed. Not unit-aware (bottle vs glass vs oz) on purpose —
+  // precise hydration math already lives in topbar.js/po-water.html; this
+  // just needs a rough "behind or not" signal.
+  function hydrationSubscore(now) {
+    const water = loadJSON('po_water_v1', null);
+    if (!water) return { score: 60, note: null };
+    const d = new Date(now);
+    const todayKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const done = (water.logs || {})[todayKey] || 0;
+    const hour = d.getHours();
+    const dayFraction = Math.min(1, Math.max(0.1, (hour - 7) / 15));
+    const roughTarget = 6;
+    const expectedByNow = roughTarget * dayFraction;
+    if (done === 0 && hour >= 10) return { score: 40, note: 'low hydration today' };
+    if (done < expectedByNow * 0.5) return { score: 50, note: null };
+    return { score: 75, note: null };
+  }
+
+  function heartRateSubscore(restingHR) {
+    if (restingHR == null) return { score: 60, note: null };
+    if (restingHR <= 55) return { score: 80, note: null };
+    if (restingHR <= 70) return { score: 60, note: null };
+    return { score: 40, note: 'elevated resting heart rate' };
+  }
+
   function sumActiveCaffeineMg(now) {
     const logs = loadJSON(CAFFEINE_LOGS_KEY, null);
     if (!Array.isArray(logs)) return null;
@@ -334,16 +474,18 @@
     return total;
   }
 
-  function levelFromScore(score) {
-    if (score >= 70) return 'high';
-    if (score >= 45) return 'medium';
-    return 'low';
+  function levelFromScore5(score) {
+    if (score >= 82) return 'peak';
+    if (score >= 68) return 'high';
+    if (score >= 50) return 'moderate';
+    if (score >= 32) return 'low';
+    return 'very_low';
   }
 
-  // Returns { level, score, connected, factors } — connected reflects
-  // whether Apple Health data has ever landed (caffeine is always "local"
-  // and doesn't gate this the same way).
-  function getProductivityContext() {
+  // Returns { level (5-level), score, connected, factors, updatedAt }.
+  // connected reflects whether Apple Health data has ever landed
+  // (caffeine/hydration are always "local" and don't gate this).
+  function getEnergyContext() {
     const now = Date.now();
     const health = loadJSON(HEALTH_METRICS_KEY, null);
     const activeCaffeineMg = sumActiveCaffeineMg(now);
@@ -353,9 +495,11 @@
     const steps = stepsSubscore(health && health.steps);
     const workout = workoutSubscore(health && health.workoutsToday, now);
     const nutrition = nutritionSubscore(health && health.dietaryEnergyKcal, now);
+    const hydration = hydrationSubscore(now);
+    const heartRate = heartRateSubscore(health && health.restingHR);
 
     const weighted = [
-      [sleep, 40], [caffeine, 20], [steps, 15], [workout, 15], [nutrition, 10],
+      [sleep, 28], [caffeine, 15], [steps, 10], [workout, 12], [nutrition, 10], [hydration, 15], [heartRate, 10],
     ];
     const totalWeight = weighted.reduce((s, [, w]) => s + w, 0);
     const score = Math.round(weighted.reduce((s, [sub, w]) => s + sub.score * w, 0) / totalWeight);
@@ -363,13 +507,16 @@
     const factors = weighted.map(([sub]) => sub.note).filter(Boolean);
 
     return {
-      level: levelFromScore(score),
+      level: levelFromScore5(score),
       score,
       connected: !!health,
       factors,
       updatedAt: health && health.updatedAt || null,
     };
   }
+  // Kept as an alias — earlier code (and anything cached) may still call
+  // the old name; same function, 5-level output now instead of 3-level.
+  const getProductivityContext = getEnergyContext;
 
   // ---------- Nutrition ----------
   // Cal AI (and most photo-based calorie trackers) write every logged meal's
@@ -417,9 +564,11 @@
   window.Tasks = {
     CATEGORIES,
     ENERGY_LEVELS,
+    getEnergyContext,
     getProductivityContext,
     getCaffeineContext,
     getNutritionContext,
+    getStreakContext,
     estimateCalorieTarget,
     getTasks,
     setTasks,

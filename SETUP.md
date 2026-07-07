@@ -192,11 +192,37 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 
 ---
 
-## 6. Nova (AI mentor / gym coach) — optional
+## 6. Automatic task classification (optional, but the point of Manage Tasks)
+
+Lets **Manage Tasks** (the list icon on the home screen) infer category, ROI, urgency,
+difficulty, and estimated time from just a task title — "Email professor" or "Costco"
+gets classified without you touching a dropdown. Runs **server-side** (unlike Nova below),
+so it works from every device without re-entering a key on each one.
+
+1. Get a key at **console.anthropic.com** (pay-as-you-go; classification calls are small —
+   a few hundred tokens each).
+2. In Vercel → **Settings → Environment Variables**, add:
+
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_API_KEY` | your Anthropic API key |
+
+3. Redeploy. Open **Manage Tasks** → paste a task list into the bulk-add box → each line
+   should show a brief "Classifying…" tag, then fill in with inferred fields.
+
+> Without this key configured, task creation still works exactly the same — new tasks just
+> keep their defaults (category "personal", medium energy, ROI/urgency/difficulty 5) until
+> you edit them by hand. `api/classify-task.js` never blocks or fails task creation either
+> way.
+
+---
+
+## 7. Nova (AI mentor / gym coach) — optional
 
 No setup or key in the repo. Each user **pastes their own Anthropic API key** on the
 **Nova** tile; it's stored only in their browser and sent straight to Anthropic. Get a key at
-console.anthropic.com.
+console.anthropic.com. (This is a separate, browser-side key from the server-side one in
+§6 — Nova and task classification don't share credentials.)
 
 ---
 
@@ -208,4 +234,5 @@ console.anthropic.com.
 4. (Optional) Apple Health: pick a secret token, set `HEALTH_IMPORT_TOKEN` in Vercel, point
    Health Auto Export's automation at `/api/health-import?token=...`.
 5. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
-6. Change the password in `lock.js`. Done.
+6. (Optional) Automatic task classification: `ANTHROPIC_API_KEY` in Vercel.
+7. Change the password in `lock.js`. Done.
