@@ -68,6 +68,17 @@ function findMetric(metrics, name) {
   return m ? m.data : null;
 }
 
+// Nutrition metric names in particular vary across Health Auto Export versions
+// (e.g. `carbohydrates` vs `dietary_carbohydrates`) — try each candidate in
+// order and use the first one that's actually present in this payload.
+function findMetricAny(metrics, names) {
+  for (const name of names) {
+    const data = findMetric(metrics, name);
+    if (data) return data;
+  }
+  return null;
+}
+
 export function normalizeHealthPayload(body) {
   const root = (body && body.data) || body || {};
   const metrics = root.metrics || [];
@@ -77,8 +88,11 @@ export function normalizeHealthPayload(body) {
   const steps = sumQty(findMetric(metrics, 'step_count'));
   const restingHR = latestValue(findMetric(metrics, 'resting_heart_rate'), ['Avg', 'qty', 'value']);
   const activeEnergyKcal = sumQty(findMetric(metrics, 'active_energy'));
-  const dietaryEnergyKcal = sumQty(findMetric(metrics, 'dietary_energy'));
-  const proteinG = sumQty(findMetric(metrics, 'protein'));
+  const dietaryEnergyKcal = sumQty(findMetricAny(metrics, ['dietary_energy', 'dietary_energy_consumed']));
+  const proteinG = sumQty(findMetricAny(metrics, ['protein', 'dietary_protein']));
+  const carbsG = sumQty(findMetricAny(metrics, ['carbohydrates', 'dietary_carbohydrates']));
+  const fatG = sumQty(findMetricAny(metrics, ['total_fat', 'fat_total', 'dietary_fat', 'dietary_fat_total']));
+  const fiberG = sumQty(findMetricAny(metrics, ['fiber', 'dietary_fiber']));
 
   let workoutCount = 0, workoutMinutes = 0, lastWorkoutEndedAt = null;
   if (Array.isArray(workouts)) {
@@ -98,6 +112,9 @@ export function normalizeHealthPayload(body) {
     activeEnergyKcal: activeEnergyKcal != null ? Math.round(activeEnergyKcal) : null,
     dietaryEnergyKcal: dietaryEnergyKcal != null ? Math.round(dietaryEnergyKcal) : null,
     proteinG: proteinG != null ? Math.round(proteinG) : null,
+    carbsG: carbsG != null ? Math.round(carbsG) : null,
+    fatG: fatG != null ? Math.round(fatG) : null,
+    fiberG: fiberG != null ? Math.round(fiberG) : null,
     workoutsToday: { count: workoutCount, minutes: Math.round(workoutMinutes), lastEndedAt: lastWorkoutEndedAt },
     updatedAt: Date.now(),
   };

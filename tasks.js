@@ -371,10 +371,56 @@
     };
   }
 
+  // ---------- Nutrition ----------
+  // Cal AI (and most photo-based calorie trackers) write every logged meal's
+  // calories/protein/carbs/fat straight to Apple Health — confirmed via web
+  // search, no separate Cal AI integration exists or is needed. Nutrition
+  // therefore rides the same health_metrics_v1 pipeline as sleep/steps/etc.
+  const WATER_PROFILE_KEY = 'po_water_v1';
+
+  function getCaffeineContext() {
+    return { activeMg: sumActiveCaffeineMg(Date.now()) };
+  }
+
+  // HealthKit has no concept of a calorie "target" — only consumption
+  // samples — so if the user hasn't set one explicitly, estimate one from
+  // the same profile fields the water tracker already collects (height/
+  // weight/age/sex/activity), via Mifflin-St Jeor. This is a rough default,
+  // not a substitute for Cal AI's own plan; overridable in Settings.
+  function estimateCalorieTarget(profile) {
+    if (!profile || !profile.weightKg || !profile.age) return null;
+    const heightCm = profile.heightCm || 170;
+    const bmr = 10 * profile.weightKg + 6.25 * heightCm - 5 * profile.age + (profile.sex === 'f' ? -161 : 5);
+    const activityMultiplier = Math.min(1.9, 1.2 + (profile.activityHrsPerWeek || 0) * 0.03);
+    return Math.round(bmr * activityMultiplier);
+  }
+
+  function getNutritionContext() {
+    const health = loadJSON(HEALTH_METRICS_KEY, null);
+    const water = loadJSON(WATER_PROFILE_KEY, null);
+    const profile = (water && water.profile) || {};
+    const target = profile.calorieTarget || estimateCalorieTarget(profile);
+    const consumed = health && health.dietaryEnergyKcal != null ? health.dietaryEnergyKcal : null;
+    return {
+      connected: !!(health && consumed != null),
+      caloriesConsumed: consumed,
+      caloriesTarget: target,
+      caloriesRemaining: (consumed != null && target != null) ? Math.max(0, target - consumed) : null,
+      proteinG: health && health.proteinG != null ? health.proteinG : null,
+      carbsG: health && health.carbsG != null ? health.carbsG : null,
+      fatG: health && health.fatG != null ? health.fatG : null,
+      fiberG: health && health.fiberG != null ? health.fiberG : null,
+      updatedAt: health && health.updatedAt || null,
+    };
+  }
+
   window.Tasks = {
     CATEGORIES,
     ENERGY_LEVELS,
     getProductivityContext,
+    getCaffeineContext,
+    getNutritionContext,
+    estimateCalorieTarget,
     getTasks,
     setTasks,
     addTask,

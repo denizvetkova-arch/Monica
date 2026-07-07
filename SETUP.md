@@ -98,16 +98,22 @@ Replace the old URL/key in these files:
 
 ---
 
-## 4. Apple Health (optional)
+## 4. Apple Health (optional) — also how nutrition (Cal AI) gets in
 
-Feeds sleep, steps, resting heart rate, workouts, and nutrition (calories/protein) into the
-"Productivity Level" pill on the decision screen (`index.html`), which nudges task ranking
-toward lighter work on a rough night and deep work when you're rested. There's no OAuth here
-— Apple doesn't let any web app read HealthKit data directly, so a small iOS app called
-**Health Auto Export** (~$5, one-time, App Store) acts as the bridge: it posts a JSON export
-to a webhook on a schedule. "Continuous" in practice means Health Auto Export's own
-background-delivery automation, which iOS batches — expect updates every so often through
-the day, not truly instant.
+Feeds sleep, steps, resting heart rate, workouts, and nutrition (calories/protein/carbs/
+fat/fiber) into Today's State, which the Decision Engine uses to pick lighter work on a
+rough night, deep work when you're rested, and to factor protein pacing into task choice.
+There's no OAuth here — Apple doesn't let any web app read HealthKit data directly, so a
+small iOS app called **Health Auto Export** (~$5, one-time, App Store) acts as the bridge:
+it posts a JSON export to a webhook on a schedule. "Continuous" in practice means Health
+Auto Export's own background-delivery automation, which iOS batches — expect updates every
+so often through the day, not truly instant.
+
+**Nutrition specifically needs no separate integration.** Cal AI (and most photo-based
+calorie trackers) write every logged meal's calories/protein/carbs/fat straight to Apple
+Health on their own — confirmed via their App Store listing. As long as Health Auto Export
+is set up per this section and includes the nutrition metrics below, Cal AI's data rides
+along automatically.
 
 1. Pick a secret string yourself (anything — a password generator output is fine). This is
    **your token**, not something Apple or Health Auto Export gives you.
@@ -119,8 +125,9 @@ the day, not truly instant.
 
    Redeploy after adding it.
 3. Install **Health Auto Export** on your iPhone → grant it Health access for at least:
-   Sleep Analysis, Steps, Resting Heart Rate, Active Energy, and (if you log food into
-   Apple Health via a calorie app like Cal AI) Dietary Energy + Protein.
+   Sleep Analysis, Steps, Resting Heart Rate, Active Energy, and — for the nutrition strip —
+   Dietary Energy, Protein, Carbohydrates, Total Fat, Fiber (these populate automatically
+   once Cal AI or any food-logging app is writing to Apple Health).
 4. In the app: **Automations → New Automation → REST API**.
    - URL: `https://monica-zeta-blue.vercel.app/api/health-import?token=YOUR_TOKEN`
      (use the secret from step 1).
@@ -138,6 +145,12 @@ the day, not truly instant.
 > `normalizeHealthPayload()` — Health Auto Export's exact field names have shifted across
 > versions, and that function may need a field-name tweak to match your export (use the
 > app's "Preview Data" screen on your automation to see the real payload shape).
+
+**"Calories remaining"** needs a daily target, which HealthKit has no concept of (only
+consumption samples). The app estimates one from your height/weight/age/sex/activity
+(Mifflin-St Jeor) automatically — no setup needed. To override it with your own number
+instead, set **Daily calorie target** in Settings (gear icon → scroll down, below Active
+hours/week).
 
 ---
 

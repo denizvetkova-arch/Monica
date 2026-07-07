@@ -12,6 +12,8 @@
 <script src="sync.js" defer></script>
 <script src="topbar.js" defer></script>
 <script src="tasks.js" defer></script>
+<script src="state.js" defer></script>
+<script src="decision-engine.js" defer></script>
 
 <style>
 :root {
@@ -109,13 +111,37 @@ body::after {
 .prod-pill.medium .dot { background: #F2C063; box-shadow: 0 0 8px rgba(242,192,99,0.6); }
 .prod-pill.high .dot { background: #6BE3A4; box-shadow: 0 0 8px rgba(107,227,164,0.6); }
 .prod-pill .factors { color: var(--text-tertiary); font-weight: 500; }
+.dtn-category {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-tertiary); margin-bottom: 8px;
+}
 .next-title {
   font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
-  color: var(--text-primary); margin: 0 0 14px; line-height: 1.25;
+  color: var(--text-primary); margin: 0 0 10px; line-height: 1.25;
   min-height: 33px;
 }
 @media (max-width: 480px) { .next-title { font-size: 21px; } }
-.next-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.dtn-duration {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+  color: var(--text-secondary); margin: 0 0 18px;
+}
+.dtn-why-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-tertiary); margin-bottom: 8px;
+}
+.dtn-why-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.dtn-why-item {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 13.5px; color: var(--text-secondary); line-height: 1.4;
+}
+.dtn-why-item::before { content: '•'; color: var(--success); flex-shrink: 0; }
+.dtn-next {
+  font-size: 12px; color: var(--text-tertiary);
+  padding-top: 14px; margin-top: 2px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
 .chip {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 11px;
@@ -129,6 +155,14 @@ body::after {
 .chip.soon { color: var(--warning); border-color: rgba(242,192,99,0.35); background: rgba(242,192,99,0.08); }
 
 .empty-hint { font-size: 14px; color: var(--text-tertiary); margin: 0 0 14px; }
+
+/* ===== Nutrition strip ===== */
+.nutrition-section { margin-top: 22px; }
+.nutrition-title {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--text-tertiary); margin-bottom: 10px;
+}
+.nutrition-row { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* ===== Action buttons ===== */
 .actions { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
@@ -153,15 +187,6 @@ body::after {
 }
 .btn-secondary:hover { background: rgba(255,255,255,0.08); }
 .btn-secondary:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn-add {
-  width: 100%; margin-top: 4px; padding: 14px;
-  border: 1px dashed rgba(255,255,255,0.18); border-radius: 14px;
-  background: transparent; color: var(--text-secondary);
-  font-family: inherit; font-size: 13px; font-weight: 700;
-  letter-spacing: 0.04em;
-  cursor: pointer; transition: color 0.2s, border-color 0.2s, background 0.2s;
-}
-.btn-add:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.32); background: rgba(255,255,255,0.04); border-style: solid; }
 
 .remaining-note { text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 16px; }
 
@@ -183,15 +208,13 @@ body::after {
 .modal-close:hover { color: var(--text-primary); }
 .field { margin-bottom: 14px; }
 .field-label { font-size: 11px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 7px; display: block; }
-.set-input, .set-select {
+.set-input {
   width: 100%; padding: 11px 13px;
   border: 1px solid rgba(255,255,255,0.08); border-radius: 11px;
   background: rgba(0,0,0,0.3); color: var(--text-primary);
   font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.2s;
 }
-.set-input:focus, .set-select:focus { border-color: rgba(255,255,255,0.28); }
-.set-select option { background: #0e0e10; }
-.field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.set-input:focus { border-color: rgba(255,255,255,0.28); }
 .seg { display: flex; border: 1px solid rgba(255,255,255,0.10); border-radius: 11px; overflow: hidden; }
 .seg button { flex: 1; border: 0; background: transparent; color: var(--text-tertiary); font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px 8px; cursor: pointer; transition: background 0.15s, color 0.15s; }
 .seg button.on { background: rgba(255,255,255,0.12); color: var(--text-primary); }
@@ -244,12 +267,20 @@ body::after {
 
   <div class="hub-head">
     <h1 class="dash-title">Deni's Dashboard</h1>
-    <button class="icon-btn" id="settingsOpen" type="button" aria-label="Settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-      </svg>
-    </button>
+    <div style="display:flex;gap:8px;">
+      <a class="icon-btn" href="manage.html" aria-label="Manage tasks">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/>
+          <path d="M4.5 6l.75.75L6.5 5.25"/><path d="M4.5 12l.75.75L6.5 11.25"/><path d="M4.5 18l.75.75L6.5 17.25"/>
+        </svg>
+      </a>
+      <button class="icon-btn" id="settingsOpen" type="button" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
   <div class="prod-pill" id="prodPill" style="display:none">
@@ -259,21 +290,32 @@ body::after {
   </div>
 
   <div class="next-card">
-    <div class="next-eyebrow" id="nextEyebrow">Right now</div>
+    <div class="next-eyebrow" id="nextEyebrow">Do This Now</div>
+    <div class="dtn-category" id="dtnCategory" style="display:none"></div>
     <h2 class="next-title" id="nextTitle">Loading…</h2>
-    <div class="next-meta" id="nextMeta"></div>
+    <div class="dtn-duration" id="dtnDuration"></div>
+    <div id="dtnWhyBlock" style="display:none">
+      <div class="dtn-why-label">Why</div>
+      <ul class="dtn-why-list" id="dtnWhyList"></ul>
+    </div>
+    <div class="dtn-next" id="dtnNext" style="display:none"></div>
   </div>
 
   <div class="actions">
     <button class="btn-complete" id="btnComplete" type="button">Complete</button>
     <div class="actions-row">
       <button class="btn-secondary" id="btnSkip" type="button">Skip</button>
+      <button class="btn-secondary" id="btnDelay" type="button">Delay 15m</button>
       <button class="btn-secondary" id="btnReplan" type="button">Replan</button>
     </div>
-    <button class="btn-add" id="btnAdd" type="button">+ ADD TASK</button>
   </div>
 
   <div class="remaining-note" id="remainingNote"></div>
+
+  <div class="nutrition-section" id="nutritionSection" style="display:none">
+    <div class="nutrition-title">Nutrition Today</div>
+    <div class="nutrition-row" id="nutritionRow"></div>
+  </div>
 
   <div class="cal-section" id="calSection" style="display:none">
     <div class="cal-title">Today's Calendar</div>
@@ -375,65 +417,15 @@ body::after {
       <input class="set-input" id="activity" type="number" min="0" inputmode="decimal" placeholder="e.g. 5">
     </div>
 
+    <div class="field">
+      <label class="field-label">Daily calorie target (optional)</label>
+      <input class="set-input" id="calorieTarget" type="number" min="0" inputmode="numeric" placeholder="auto-estimated if left blank">
+    </div>
+
     <button class="set-save" id="settingsSave" type="button">Save</button>
     <div class="set-status" id="settingsStatus"></div>
 
     <a class="more-tools-link" href="hub.html">More tools (Fitness, Health, Water, Finance, Caffeine, Nova) →</a>
-  </div>
-</div>
-
-<!-- ===== Add Task modal ===== -->
-<div class="modal-bg" id="addBg">
-  <div class="modal" role="dialog" aria-label="Add task">
-    <div class="modal-head">
-      <span class="modal-title">Add Task</span>
-      <button class="modal-close" id="addClose" type="button" aria-label="Close">×</button>
-    </div>
-
-    <div class="field">
-      <label class="field-label">Title</label>
-      <input class="set-input" id="taskTitle" type="text" placeholder="What needs doing?" autocomplete="off">
-    </div>
-
-    <div class="field">
-      <label class="field-label">Category</label>
-      <select class="set-select" id="taskCategory">
-        <option value="lab">Lab</option>
-        <option value="school">School</option>
-        <option value="debate">Debate</option>
-        <option value="health">Health</option>
-        <option value="money">Money</option>
-        <option value="admin">Admin</option>
-        <option value="personal" selected>Personal</option>
-      </select>
-    </div>
-
-    <div class="field">
-      <label class="field-label">Energy required</label>
-      <div class="seg" id="energySeg">
-        <button type="button" data-v="low">Low</button>
-        <button type="button" data-v="medium" class="on">Medium</button>
-        <button type="button" data-v="high">High</button>
-      </div>
-    </div>
-
-    <div class="field field-row-2">
-      <div>
-        <label class="field-label">Importance (1–5)</label>
-        <input class="set-input" id="taskImportance" type="number" min="1" max="5" value="3" inputmode="numeric">
-      </div>
-      <div>
-        <label class="field-label">Est. minutes</label>
-        <input class="set-input" id="taskMinutes" type="number" min="1" value="30" inputmode="numeric">
-      </div>
-    </div>
-
-    <div class="field">
-      <label class="field-label">Deadline (optional)</label>
-      <input class="set-input" id="taskDeadline" type="datetime-local">
-    </div>
-
-    <button class="set-save" id="taskSave" type="button">Add Task</button>
   </div>
 </div>
 
@@ -445,23 +437,11 @@ body::after {
   const CATEGORY_EMOJI = { lab: '🧪', school: '📚', debate: '🎤', health: '💊', money: '💰', admin: '🗂️', personal: '🌱' };
 
   function whenTasksReady(fn) {
-    if (window.Tasks) { fn(); return; }
+    if (window.DecisionEngine) { fn(); return; }
     document.addEventListener('DOMContentLoaded', () => {
-      if (window.Tasks) fn();
-      else setTimeout(() => window.Tasks && fn(), 50);
+      if (window.DecisionEngine) fn();
+      else setTimeout(() => window.DecisionEngine && fn(), 50);
     });
-  }
-
-  function formatDeadline(deadline, now) {
-    if (!deadline) return { text: 'No deadline', cls: '' };
-    const d = new Date(deadline).getTime();
-    const diffMs = d - now;
-    const diffH = diffMs / 3600000;
-    if (diffH <= 0) return { text: 'Overdue', cls: 'urgent' };
-    if (diffH < 6) return { text: 'Due in ' + Math.round(diffH * 60) + 'm', cls: 'urgent' };
-    if (diffH < 24) return { text: 'Due in ' + Math.round(diffH) + 'h', cls: 'soon' };
-    const days = Math.round(diffH / 24);
-    return { text: 'Due in ' + days + 'd', cls: '' };
   }
 
   function renderProductivityPill(productivity) {
@@ -474,72 +454,6 @@ body::after {
     pill.style.display = '';
     $('prodLabel').textContent = productivity.level.charAt(0).toUpperCase() + productivity.level.slice(1) + ' energy';
     $('prodFactors').textContent = '· ' + productivity.factors.slice(0, 2).join(', ');
-  }
-
-  function formatFreeMinutes(mins) {
-    if (mins <= 0) return 'Busy right now';
-    if (mins < 60) return mins + 'm free';
-    const h = Math.floor(mins / 60), m = mins % 60;
-    return h + 'h' + (m ? ' ' + m + 'm' : '') + ' free';
-  }
-
-  async function render() {
-    if (!window.Tasks) return;
-    const tasks = window.Tasks.getTasks();
-    const now = Date.now();
-
-    let availableMinutes = null;
-    let cal = null;
-    try {
-      cal = await window.Tasks.getCalendarContext();
-      if (cal && cal.connected) availableMinutes = cal.availableMinutes;
-    } catch (e) {}
-
-    const productivity = window.Tasks.getProductivityContext();
-    renderProductivityPill(productivity);
-
-    const ranked = window.Tasks.rankTasks(tasks, { now, availableMinutes, currentEnergy: productivity.level });
-    const top = ranked[0];
-
-    const titleEl = $('nextTitle');
-    const metaEl  = $('nextMeta');
-    const eyebrow = $('nextEyebrow');
-    const completeBtn = $('btnComplete');
-    const skipBtn = $('btnSkip');
-
-    if (!top) {
-      eyebrow.textContent = 'Right now';
-      titleEl.textContent = 'Nothing on your list';
-      metaEl.innerHTML = '<span class="chip">Add a task to get moving</span>';
-      completeBtn.disabled = true;
-      skipBtn.disabled = true;
-    } else {
-      const task = top.task;
-      eyebrow.textContent = 'Right now';
-      titleEl.textContent = task.title;
-      const dl = formatDeadline(task.deadline, now);
-      const chips = [
-        '<span class="chip">' + (CATEGORY_EMOJI[task.category] || '') + ' ' + task.category + '</span>',
-        '<span class="chip">' + task.estimatedMinutes + ' min</span>',
-        '<span class="chip">' + task.energyLevel + ' energy</span>',
-        '<span class="chip ' + dl.cls + '">' + dl.text + '</span>',
-      ];
-      if (cal && cal.connected && cal.availableMinutes != null) {
-        chips.push('<span class="chip">📅 ' + formatFreeMinutes(cal.availableMinutes) + '</span>');
-      }
-      metaEl.innerHTML = chips.join('');
-      completeBtn.disabled = false;
-      skipBtn.disabled = false;
-    }
-
-    const remaining = tasks.filter(t => !t.done).length;
-    $('remainingNote').textContent = remaining === 0 ? '' :
-      (remaining === 1 ? '1 task waiting' : remaining + ' tasks waiting');
-
-    completeBtn.dataset.taskId = top ? top.task.id : '';
-    skipBtn.dataset.taskId = top ? top.task.id : '';
-
-    renderCalendarList(cal, now);
   }
 
   function formatEventTime(iso, allDay) {
@@ -573,6 +487,85 @@ body::after {
     section.style.display = '';
   }
 
+  function renderNutritionStrip(nutrition) {
+    const section = $('nutritionSection');
+    const row = $('nutritionRow');
+    if (!nutrition || !nutrition.connected) {
+      section.style.display = 'none';
+      return;
+    }
+    const chips = [];
+    if (nutrition.caloriesConsumed != null) {
+      const label = nutrition.caloriesTarget != null
+        ? nutrition.caloriesConsumed + ' / ' + nutrition.caloriesTarget + ' kcal'
+        : nutrition.caloriesConsumed + ' kcal';
+      chips.push('<span class="chip">' + label + '</span>');
+    }
+    if (nutrition.caloriesRemaining != null) chips.push('<span class="chip">' + nutrition.caloriesRemaining + ' kcal left</span>');
+    if (nutrition.proteinG != null) chips.push('<span class="chip">' + nutrition.proteinG + 'g protein</span>');
+    if (nutrition.carbsG != null) chips.push('<span class="chip">' + nutrition.carbsG + 'g carbs</span>');
+    if (nutrition.fatG != null) chips.push('<span class="chip">' + nutrition.fatG + 'g fat</span>');
+    if (nutrition.fiberG != null) chips.push('<span class="chip">' + nutrition.fiberG + 'g fiber</span>');
+    if (chips.length === 0) { section.style.display = 'none'; return; }
+    row.innerHTML = chips.join('');
+    section.style.display = '';
+  }
+
+  async function render() {
+    if (!window.DecisionEngine) return;
+    const result = await window.DecisionEngine.decide();
+    const { task, durationMin, reasons, nextPreview, state } = result;
+
+    renderProductivityPill(state.productivity);
+    renderCalendarList(state.calendar, state.now);
+    renderNutritionStrip(state.nutrition);
+
+    const categoryEl = $('dtnCategory');
+    const titleEl = $('nextTitle');
+    const durationEl = $('dtnDuration');
+    const whyBlock = $('dtnWhyBlock');
+    const whyList = $('dtnWhyList');
+    const nextEl = $('dtnNext');
+    const completeBtn = $('btnComplete');
+    const skipBtn = $('btnSkip');
+    const delayBtn = $('btnDelay');
+
+    if (!task) {
+      categoryEl.style.display = 'none';
+      titleEl.textContent = 'Nothing on your list';
+      durationEl.textContent = '';
+      whyBlock.style.display = 'none';
+      nextEl.style.display = 'none';
+      completeBtn.disabled = true;
+      skipBtn.disabled = true;
+      delayBtn.disabled = true;
+    } else {
+      categoryEl.style.display = '';
+      categoryEl.textContent = (CATEGORY_EMOJI[task.category] || '') + ' ' + task.category;
+      titleEl.textContent = task.title;
+      durationEl.textContent = 'Duration: ' + durationMin + ' minutes';
+      whyBlock.style.display = reasons.length ? '' : 'none';
+      whyList.innerHTML = reasons.map(r => '<li class="dtn-why-item">' + r.replace(/</g, '&lt;') + '</li>').join('');
+      if (nextPreview) {
+        nextEl.style.display = '';
+        nextEl.textContent = 'Next up: ' + nextPreview.title + ' (~' + nextPreview.durationMin + ' min)';
+      } else {
+        nextEl.style.display = 'none';
+      }
+      completeBtn.disabled = false;
+      skipBtn.disabled = false;
+      delayBtn.disabled = false;
+    }
+
+    const remaining = state.tasks.filter(t => !t.done).length;
+    $('remainingNote').textContent = remaining === 0 ? '' :
+      (remaining === 1 ? '1 task waiting' : remaining + ' tasks waiting');
+
+    completeBtn.dataset.taskId = task ? task.id : '';
+    skipBtn.dataset.taskId = task ? task.id : '';
+    delayBtn.dataset.taskId = task ? task.id : '';
+  }
+
   function wireActions() {
     $('btnComplete').addEventListener('click', function () {
       const id = this.dataset.taskId;
@@ -586,57 +579,19 @@ body::after {
       window.Tasks.skipTask(id, 60);
       render();
     });
-    $('btnReplan').addEventListener('click', function () {
+    $('btnDelay').addEventListener('click', function () {
+      const id = this.dataset.taskId;
+      if (!id) return;
+      window.Tasks.skipTask(id, 15);
       render();
     });
-  }
-
-  /* ---------- Add Task modal ---------- */
-  let energyValue = 'medium';
-  function wireAddModal() {
-    function open() {
-      $('taskTitle').value = '';
-      $('taskCategory').value = 'personal';
-      energyValue = 'medium';
-      $('energySeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === 'medium'));
-      $('taskImportance').value = 3;
-      $('taskMinutes').value = 30;
-      $('taskDeadline').value = '';
-      $('addBg').classList.add('show');
-      setTimeout(() => $('taskTitle').focus(), 50);
-    }
-    function close() { $('addBg').classList.remove('show'); }
-
-    $('btnAdd').addEventListener('click', open);
-    $('addClose').addEventListener('click', close);
-    $('addBg').addEventListener('click', (e) => { if (e.target === $('addBg')) close(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('addBg').classList.contains('show')) close(); });
-
-    $('energySeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-      energyValue = b.dataset.v;
-      $('energySeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-    }));
-
-    $('taskSave').addEventListener('click', () => {
-      const title = $('taskTitle').value.trim();
-      if (!title) { $('taskTitle').focus(); return; }
-      const deadlineVal = $('taskDeadline').value;
-      window.Tasks.addTask({
-        title,
-        category: $('taskCategory').value,
-        energyLevel: energyValue,
-        importance: parseInt($('taskImportance').value, 10) || 3,
-        estimatedMinutes: parseInt($('taskMinutes').value, 10) || 30,
-        deadline: deadlineVal ? new Date(deadlineVal).toISOString() : null,
-      });
-      close();
+    $('btnReplan').addEventListener('click', function () {
       render();
     });
   }
 
   whenTasksReady(function () {
     wireActions();
-    wireAddModal();
     render();
 
     window.addEventListener('tasks-changed', render);
@@ -745,6 +700,7 @@ body::after {
     else $('weight').value = '';
     $('age').value = p.age || '';
     $('activity').value = (p.activityHrsPerWeek != null ? p.activityHrsPerWeek : '');
+    $('calorieTarget').value = (p.calorieTarget != null ? p.calorieTarget : '');
   }
 
   /* ---------- save back into po_water_v1 (merge, never overwrite logs) ---------- */
@@ -758,6 +714,8 @@ body::after {
     const age = parseInt($('age').value, 10); if (age > 0) w.profile.age = age;
     w.profile.sex = sex;
     const act = parseFloat($('activity').value); if (act >= 0 && !isNaN(act)) w.profile.activityHrsPerWeek = act;
+    const calTarget = parseInt($('calorieTarget').value, 10);
+    w.profile.calorieTarget = (calTarget > 0 && !isNaN(calTarget)) ? calTarget : null;
     saveJSON(WATER_KEY, w);
     const s = $('settingsStatus'); s.textContent = 'Saved ✓';
     setTimeout(() => { s.textContent = ''; }, 1800);
