@@ -724,7 +724,11 @@ body::after {
       alert("Google Calendar isn't configured yet — set GOOGLE_CLIENT_ID in Vercel (see SETUP.md).");
       return;
     }
-    const redirect = window.location.origin + '/api/google-callback';
+    // Fixed, not window.location.origin — must exactly match the single
+    // "Authorized redirect URI" registered in Google Cloud Console, or
+    // Google returns redirect_uri_mismatch. Breaks on preview/deployment
+    // URLs otherwise, since only the production domain is registered.
+    const redirect = 'https://monica-zeta-blue.vercel.app/api/google-callback';
     const url = 'https://accounts.google.com/o/oauth2/v2/auth'
       + '?client_id='     + encodeURIComponent(clientId)
       + '&redirect_uri='  + encodeURIComponent(redirect)

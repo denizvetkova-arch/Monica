@@ -17,13 +17,14 @@ export default async function handler(req, res) {
 
   const clientId     = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  // ALWAYS derive the redirect from the live host — Google sends the
-  // browser back to whatever redirect_uri was used at login (i.e. this
-  // exact origin), so deriving it here guarantees the token-exchange
-  // redirect_uri matches the authorize redirect_uri.
-  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
-  const host  = req.headers['x-forwarded-host'] || req.headers.host;
-  const redirectUri = proto + '://' + host + '/api/google-callback';
+  // Fixed, not derived from the request host. Google only accepts an exact
+  // match against the "Authorized redirect URIs" configured in Cloud
+  // Console — deriving this from x-forwarded-host (as the WHOOP callback
+  // does) breaks the moment the site is opened via a Vercel preview/
+  // deployment URL instead of the production domain, since that URI was
+  // never registered with Google. This app only ever runs at one domain,
+  // so hardcode it instead of chasing every possible host.
+  const redirectUri = 'https://monica-zeta-blue.vercel.app/api/google-callback';
   if (!clientId || !clientSecret) {
     return res.status(500).send('Server not configured (missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).');
   }
