@@ -124,7 +124,7 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 | `GOOGLE_CLIENT_ID` | your OAuth client's Client ID |
 | `GOOGLE_CLIENT_SECRET` | your OAuth client's Client secret (**secret**) |
 
-6. Redeploy. Open the site at that exact domain → **Hub** (gear icon on the home screen) →
+6. Redeploy. Open the site at that exact domain → tap the **gear icon** on the home screen →
    **Connect Google Calendar**.
 
 > The callback auto-detects the domain, same as WHOOP — no redirect-URI env var needed.

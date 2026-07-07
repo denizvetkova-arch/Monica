@@ -189,6 +189,39 @@ body::after {
 }
 .set-save:hover { filter: brightness(1.05); }
 .set-save:active { transform: translateY(1px); }
+.set-status { text-align: center; font-size: 12px; color: var(--success); min-height: 16px; margin-top: 8px; }
+.field-row { display: flex; gap: 8px; align-items: center; }
+.section-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 20px 0 14px; }
+.whoop-box { margin-top: 8px; padding: 16px; border-radius: 14px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.06); }
+.whoop-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.whoop-status { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.whoop-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #76746E; }
+.whoop-status.on .dot { background: #6BE3A4; box-shadow: 0 0 8px rgba(107,227,164,0.7); }
+.whoop-sync { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); text-align: right; }
+.whoop-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 14px; }
+.whoop-stat { text-align: center; }
+.whoop-stat .v { font-size: 20px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1; }
+.whoop-stat .l { font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); margin-top: 5px; }
+.whoop-btn { width: 100%; margin-top: 14px; padding: 11px; border: 1px solid rgba(255,255,255,0.12); border-radius: 11px; background: transparent; color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.whoop-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+.more-tools-link { display: block; text-align: center; margin-top: 18px; font-size: 12px; color: var(--text-tertiary); text-decoration: none; }
+.more-tools-link:hover { color: var(--text-primary); }
+
+/* ===== Today's Calendar (on the decision screen) ===== */
+.cal-section { margin-top: 22px; }
+.cal-title {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--text-tertiary); margin-bottom: 10px;
+}
+.cal-row {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 13px;
+}
+.cal-row:last-child { border-bottom: none; }
+.cal-time { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); flex-shrink: 0; width: 76px; }
+.cal-event-title { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -196,12 +229,12 @@ body::after {
 
   <div class="hub-head">
     <h1 class="dash-title">Deni's Dashboard</h1>
-    <a class="icon-btn" href="hub.html" aria-label="Hub & settings">
+    <button class="icon-btn" id="settingsOpen" type="button" aria-label="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
-    </a>
+    </button>
   </div>
 
   <div class="next-card">
@@ -221,6 +254,93 @@ body::after {
 
   <div class="remaining-note" id="remainingNote"></div>
 
+  <div class="cal-section" id="calSection" style="display:none">
+    <div class="cal-title">Today's Calendar</div>
+    <div id="calList"></div>
+  </div>
+
+</div>
+
+<!-- ===== Settings modal ===== -->
+<div class="modal-bg" id="settingsBg">
+  <div class="modal" role="dialog" aria-label="Settings">
+    <div class="modal-head">
+      <span class="modal-title">Settings</span>
+      <button class="modal-close" id="settingsClose" type="button" aria-label="Close">×</button>
+    </div>
+
+    <label class="field-label">Google Calendar</label>
+    <div class="whoop-box" id="gcalBox">
+      <div class="whoop-row">
+        <span class="whoop-status" id="gcalStatus"><span class="dot"></span><span id="gcalStatusText">Not connected</span></span>
+      </div>
+      <button class="whoop-btn" id="gcalAction" type="button">Connect Google Calendar</button>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <label class="field-label">WHOOP</label>
+    <div class="whoop-box">
+      <div class="whoop-row">
+        <span class="whoop-status" id="whStatus"><span class="dot"></span><span id="whStatusText">Not connected</span></span>
+        <span class="whoop-sync" id="whSync"></span>
+      </div>
+      <div class="whoop-stats" id="whStats" style="display:none">
+        <div class="whoop-stat"><div class="v" id="whRec">—</div><div class="l">Recovery</div></div>
+        <div class="whoop-stat"><div class="v" id="whSleep">—</div><div class="l">Sleep</div></div>
+        <div class="whoop-stat"><div class="v" id="whRhr">—</div><div class="l">Rest HR</div></div>
+      </div>
+      <button class="whoop-btn" id="whAction" type="button">Sync now</button>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <div class="field">
+      <label class="field-label">Height</label>
+      <div class="field-row">
+        <input class="set-input" id="heightA" type="number" min="0" inputmode="decimal" placeholder="cm">
+        <input class="set-input" id="heightB" type="number" min="0" inputmode="decimal" placeholder="in" style="display:none">
+        <div class="seg" id="heightUnitSeg">
+          <button type="button" data-u="cm" class="on">cm</button>
+          <button type="button" data-u="ft">ft/in</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Weight</label>
+      <div class="field-row">
+        <input class="set-input" id="weight" type="number" min="0" inputmode="decimal" placeholder="weight">
+        <div class="seg" id="weightUnitSeg">
+          <button type="button" data-u="kg" class="on">kg</button>
+          <button type="button" data-u="lb">lb</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Age</label>
+      <input class="set-input" id="age" type="number" min="0" inputmode="numeric" placeholder="years">
+    </div>
+
+    <div class="field">
+      <label class="field-label">Sex</label>
+      <div class="seg" id="sexSeg" style="width:100%;display:flex">
+        <button type="button" data-s="m" style="flex:1">Male</button>
+        <button type="button" data-s="f" style="flex:1">Female</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Active hours / week</label>
+      <input class="set-input" id="activity" type="number" min="0" inputmode="decimal" placeholder="e.g. 5">
+    </div>
+
+    <button class="set-save" id="settingsSave" type="button">Save</button>
+    <div class="set-status" id="settingsStatus"></div>
+
+    <a class="more-tools-link" href="hub.html">More tools (Fitness, Health, Water, Finance, Caffeine, Nova) →</a>
+  </div>
 </div>
 
 <!-- ===== Add Task modal ===== -->
@@ -364,6 +484,39 @@ body::after {
 
     completeBtn.dataset.taskId = top ? top.task.id : '';
     skipBtn.dataset.taskId = top ? top.task.id : '';
+
+    renderCalendarList(cal, now);
+  }
+
+  function formatEventTime(iso, allDay) {
+    if (allDay) return 'All day';
+    const d = new Date(iso);
+    let h = d.getHours();
+    const m = d.getMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return h + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+  }
+
+  function renderCalendarList(cal, now) {
+    const section = $('calSection');
+    const list = $('calList');
+    if (!cal || !cal.connected || !cal.events || cal.events.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    const upcoming = cal.events
+      .filter(ev => ev.allDay || new Date(ev.end).getTime() > now)
+      .slice(0, 5);
+    if (upcoming.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    list.innerHTML = upcoming.map(ev =>
+      '<div class="cal-row"><span class="cal-time">' + formatEventTime(ev.start, ev.allDay) +
+      '</span><span class="cal-event-title">' + ev.title.replace(/</g, '&lt;') + '</span></div>'
+    ).join('');
+    section.style.display = '';
   }
 
   function wireActions() {
@@ -445,6 +598,234 @@ body::after {
 
     // Recompute urgency chips / ranking as time passes.
     setInterval(render, 60 * 1000);
+  });
+})();
+</script>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const WATER_KEY = 'po_water_v1';
+  const WHOOP_KEY = 'whoop_tokens_v1';
+  const SYNC_KEY  = 'whoop_last_sync';
+  const GCAL_KEY  = 'gcal_tokens_v1';
+
+  function loadJSON(k, f) { try { return JSON.parse(localStorage.getItem(k)) || f; } catch (e) { return f; } }
+  function saveJSON(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+
+  /* ---------- Google Calendar OAuth redirect handling ---------- */
+  // google-callback.js redirects here (/index.html#google_access=...) —
+  // parse it immediately, not just when the settings modal happens to be
+  // open, so the connect flow completes even if the user never reopens it.
+  if (location.hash && location.hash.indexOf('google_access') !== -1) {
+    const h = new URLSearchParams(location.hash.slice(1));
+    const access = h.get('google_access'), refresh = h.get('google_refresh');
+    const expires = Number(h.get('google_expires')) || Date.now() + 3500e3;
+    if (access) {
+      saveJSON(GCAL_KEY, { access, refresh, expires });
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  }
+
+  // Mirror of topbar.js defaultWaterState so we never clobber the water tracker.
+  function defaultWater() {
+    return { unit:'bottle', bottleMl:500, glassMl:250, weightUnit:'kg',
+      profile:{ weightKg:75, age:25, sex:'m', activityHrsPerWeek:5 },
+      caffeineMgPerDay:200, substances:[], logs:{} };
+  }
+
+  /* ---------- unit state ---------- */
+  let heightUnit = 'cm';   // 'cm' | 'ft'
+  let weightUnit = 'kg';   // 'kg' | 'lb'
+  let sex = 'm';
+
+  function setHeightUnit(u) {
+    heightUnit = u;
+    $('heightUnitSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+    const a = $('heightA'), b = $('heightB');
+    if (u === 'cm') { a.placeholder = 'cm'; b.style.display = 'none'; }
+    else { a.placeholder = 'ft'; b.placeholder = 'in'; b.style.display = ''; }
+  }
+  function setWeightUnit(u) {
+    weightUnit = u;
+    $('weightUnitSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+  }
+  function setSex(s) {
+    sex = s;
+    $('sexSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.s === s));
+  }
+
+  function getHeightCm() {
+    if (heightUnit === 'cm') { const v = parseFloat($('heightA').value); return v > 0 ? v : null; }
+    const ft = parseFloat($('heightA').value) || 0;
+    const inch = parseFloat($('heightB').value) || 0;
+    const cm = ft * 30.48 + inch * 2.54;
+    return cm > 0 ? Math.round(cm) : null;
+  }
+  function fillHeight(cm) {
+    if (!cm) { $('heightA').value = ''; $('heightB').value = ''; return; }
+    if (heightUnit === 'cm') { $('heightA').value = Math.round(cm); }
+    else { const totalIn = cm / 2.54; $('heightA').value = Math.floor(totalIn / 12); $('heightB').value = Math.round(totalIn % 12); }
+  }
+
+  /* ---------- load existing profile into the form ---------- */
+  function populate() {
+    const w = loadJSON(WATER_KEY, defaultWater());
+    const p = w.profile || {};
+    setWeightUnit(w.weightUnit === 'lb' ? 'lb' : 'kg');
+    setHeightUnit(p.heightUnit === 'ft' ? 'ft' : 'cm');
+    setSex(p.sex === 'f' ? 'f' : 'm');
+    fillHeight(p.heightCm || null);
+    if (p.weightKg) $('weight').value = weightUnit === 'lb' ? Math.round(p.weightKg * 2.20462) : Math.round(p.weightKg);
+    else $('weight').value = '';
+    $('age').value = p.age || '';
+    $('activity').value = (p.activityHrsPerWeek != null ? p.activityHrsPerWeek : '');
+  }
+
+  /* ---------- save back into po_water_v1 (merge, never overwrite logs) ---------- */
+  function save() {
+    const w = loadJSON(WATER_KEY, defaultWater());
+    w.profile = w.profile || {};
+    const cm = getHeightCm();
+    if (cm) { w.profile.heightCm = cm; w.profile.heightUnit = heightUnit; }
+    const wv = parseFloat($('weight').value);
+    if (wv > 0) { w.profile.weightKg = weightUnit === 'lb' ? +(wv / 2.20462).toFixed(1) : wv; w.weightUnit = weightUnit; }
+    const age = parseInt($('age').value, 10); if (age > 0) w.profile.age = age;
+    w.profile.sex = sex;
+    const act = parseFloat($('activity').value); if (act >= 0 && !isNaN(act)) w.profile.activityHrsPerWeek = act;
+    saveJSON(WATER_KEY, w);
+    const s = $('settingsStatus'); s.textContent = 'Saved ✓';
+    setTimeout(() => { s.textContent = ''; }, 1800);
+  }
+
+  /* ---------- Google Calendar connect / disconnect ---------- */
+  function renderGcal() {
+    const t = loadJSON(GCAL_KEY, null);
+    const statusEl = $('gcalStatus'), txt = $('gcalStatusText'), action = $('gcalAction');
+    if (!t || !t.access) {
+      statusEl.classList.remove('on'); txt.textContent = 'Not connected';
+      action.textContent = 'Connect Google Calendar';
+    } else {
+      statusEl.classList.add('on'); txt.textContent = 'Connected';
+      action.textContent = 'Disconnect';
+    }
+  }
+  $('gcalAction').addEventListener('click', () => {
+    const t = loadJSON(GCAL_KEY, null);
+    if (t && t.access) {
+      try { localStorage.removeItem(GCAL_KEY); } catch (e) {}
+      renderGcal();
+      window.dispatchEvent(new CustomEvent('tasks-changed'));
+      return;
+    }
+    const clientId = window.DASH_GOOGLE_CLIENT_ID || '';
+    if (!clientId) {
+      alert("Google Calendar isn't configured yet — set GOOGLE_CLIENT_ID in Vercel (see SETUP.md).");
+      return;
+    }
+    const redirect = window.location.origin + '/api/google-callback';
+    const url = 'https://accounts.google.com/o/oauth2/v2/auth'
+      + '?client_id='     + encodeURIComponent(clientId)
+      + '&redirect_uri='  + encodeURIComponent(redirect)
+      + '&response_type=code'
+      + '&scope='         + encodeURIComponent('https://www.googleapis.com/auth/calendar.readonly')
+      + '&access_type=offline'
+      + '&prompt=consent'
+      + '&state='         + Math.random().toString(36).slice(2);
+    location.href = url;
+  });
+
+  /* ---------- open / close ---------- */
+  function open() { populate(); renderWhoop(); renderGcal(); $('settingsBg').classList.add('show'); syncWhoop(); }
+  function close() { $('settingsBg').classList.remove('show'); }
+  $('settingsOpen').addEventListener('click', open);
+  $('settingsClose').addEventListener('click', close);
+  $('settingsBg').addEventListener('click', (e) => { if (e.target === $('settingsBg')) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  $('settingsSave').addEventListener('click', save);
+  $('heightUnitSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const cm = getHeightCm(); setHeightUnit(b.dataset.u); fillHeight(cm);
+  }));
+  $('weightUnitSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const v = parseFloat($('weight').value);
+    const kg = v > 0 ? (weightUnit === 'lb' ? v / 2.20462 : v) : null;
+    setWeightUnit(b.dataset.u);
+    if (kg) $('weight').value = weightUnit === 'lb' ? Math.round(kg * 2.20462) : Math.round(kg);
+  }));
+  $('sexSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => setSex(b.dataset.s)));
+
+  /* ---------- WHOOP ---------- */
+  let whStats = null;
+  function relTime(ts) {
+    if (!ts) return 'never';
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s/60) + ' min ago';
+    if (s < 86400) return Math.floor(s/3600) + ' h ago';
+    return Math.floor(s/86400) + ' d ago';
+  }
+  function renderWhoop(err) {
+    const t = loadJSON(WHOOP_KEY, null);
+    const statusEl = $('whStatus'), txt = $('whStatusText'), syncEl = $('whSync'), action = $('whAction');
+    if (!t || !t.access) {
+      statusEl.classList.remove('on'); txt.textContent = 'Not connected';
+      syncEl.textContent = ''; $('whStats').style.display = 'none';
+      action.textContent = 'Connect on Health page';
+      return;
+    }
+    statusEl.classList.add('on'); txt.textContent = err ? 'Connected (sync failed)' : 'Connected';
+    const last = Number(localStorage.getItem(SYNC_KEY)) || 0;
+    syncEl.textContent = 'Last synced ' + relTime(last);
+    action.textContent = 'Sync now';
+    if (whStats) {
+      $('whStats').style.display = '';
+      $('whRec').textContent   = whStats.rec   != null ? whStats.rec + '%'  : '—';
+      $('whSleep').textContent = whStats.sleep != null ? whStats.sleep + '%' : '—';
+      $('whRhr').textContent   = whStats.rhr   != null ? whStats.rhr         : '—';
+    }
+  }
+  async function wRefresh(t) {
+    if (!t.refresh) return null;
+    try {
+      const r = await fetch('/api/whoop-refresh', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ refresh_token: t.refresh }) });
+      const j = await r.json();
+      if (j.access_token) { const n = { access:j.access_token, refresh:j.refresh_token||t.refresh, expires:Date.now()+(j.expires_in||3500)*1000 }; saveJSON(WHOOP_KEY, n); return n; }
+    } catch (e) {}
+    return null;
+  }
+  async function wFetch(path, t) {
+    const [p, qs] = path.split('?');
+    const params = new URLSearchParams(qs || ''); params.set('path', p);
+    const r = await fetch('/api/whoop-data?' + params.toString(), { headers: { 'Authorization': 'Bearer ' + t.access, 'Accept':'application/json' } });
+    if (r.status === 401) { const n = await wRefresh(t); if (n) return wFetch(path, n); throw new Error('unauthorized'); }
+    if (!r.ok) throw new Error('whoop ' + r.status);
+    return r.json();
+  }
+  async function syncWhoop() {
+    let t = loadJSON(WHOOP_KEY, null);
+    if (!t || !t.access) return;
+    if (t.expires && Date.now() > t.expires - 60000) { const n = await wRefresh(t); if (n) t = n; }
+    try {
+      const [rec, sleep] = await Promise.all([
+        wFetch('/recovery?limit=1', t).catch(()=>null),
+        wFetch('/activity/sleep?limit=1', t).catch(()=>null),
+      ]);
+      const r0 = rec && rec.records && rec.records[0];
+      const s0 = sleep && sleep.records && sleep.records[0];
+      whStats = {
+        rec:   r0 && r0.score && r0.score.recovery_score != null ? Math.round(r0.score.recovery_score) : null,
+        rhr:   r0 && r0.score && r0.score.resting_heart_rate != null ? Math.round(r0.score.resting_heart_rate) : null,
+        sleep: s0 && s0.score && s0.score.sleep_performance_percentage != null ? Math.round(s0.score.sleep_performance_percentage) : null,
+      };
+      localStorage.setItem(SYNC_KEY, String(Date.now()));
+      renderWhoop();
+    } catch (e) { renderWhoop(e); }
+  }
+  $('whAction').addEventListener('click', () => {
+    const t = loadJSON(WHOOP_KEY, null);
+    if (!t || !t.access) { window.location.href = 'health.html'; return; }
+    $('whAction').textContent = 'Syncing…'; syncWhoop();
   });
 })();
 </script>

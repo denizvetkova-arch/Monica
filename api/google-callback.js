@@ -1,9 +1,10 @@
 // ============================================================
 // GET /api/google-callback?code=...&state=...
 // Receives the OAuth code from Google, exchanges it for tokens,
-// and bounces back to /hub.html with the tokens in the URL hash.
-// The hash never reaches the server — only the browser reads it,
-// then stores the tokens in localStorage.
+// and bounces back to /index.html (the Settings modal there owns the
+// Connect flow) with the tokens in the URL hash. The hash never
+// reaches the server — only the browser reads it, then stores the
+// tokens in localStorage.
 // Env vars required on Vercel:
 //   GOOGLE_CLIENT_ID
 //   GOOGLE_CLIENT_SECRET
@@ -56,7 +57,7 @@ export default async function handler(req, res) {
       google_refresh: refresh,
       google_expires: String(Date.now() + expiresIn * 1000),
     }).toString();
-    res.writeHead(302, { Location: '/hub.html#' + hash });
+    res.writeHead(302, { Location: '/index.html#' + hash });
     res.end();
   } catch (e) {
     res.status(500).send('Unexpected error: ' + (e && e.message ? e.message : String(e)));

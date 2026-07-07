@@ -218,16 +218,36 @@
     return 0; // currently in a busy stretch
   }
 
-  // Fetches today's events and returns { connected, availableMinutes, blocks }.
-  // Degrades to { connected: false, availableMinutes: null, blocks: [] } when
-  // not connected, offline, or the token can't be refreshed — callers should
+  // Normalizes raw Google event objects into { title, start, end, allDay }
+  // for display — separate from computeFreeBlocks, which only cares about
+  // busy intervals, not titles.
+  function normalizeEvents(events) {
+    return (events || [])
+      .filter(ev => ev.status !== 'cancelled')
+      .map(ev => {
+        const start = ev.start || {};
+        const end = ev.end || {};
+        const allDay = !start.dateTime;
+        return {
+          title: ev.summary || '(untitled event)',
+          start: start.dateTime || start.date || null,
+          end: end.dateTime || end.date || null,
+          allDay,
+        };
+      })
+      .filter(ev => ev.start);
+  }
+
+  // Fetches today's events and returns { connected, availableMinutes, blocks, events }.
+  // Degrades to { connected: false, availableMinutes: null, blocks: [], events: [] }
+  // when not connected, offline, or the token can't be refreshed — callers should
   // treat that identically to "Calendar not integrated yet" (Stage 0 behavior).
   async function getCalendarContext() {
     let t = getGcalTokens();
-    if (!t || !t.access) return { connected: false, availableMinutes: null, blocks: [] };
+    if (!t || !t.access) return { connected: false, availableMinutes: null, blocks: [], events: [] };
     if (t.expires && Date.now() > t.expires - 60000) {
       const n = await gcalRefresh(t);
-      if (n) t = n; else return { connected: false, availableMinutes: null, blocks: [] };
+      if (n) t = n; else return { connected: false, availableMinutes: null, blocks: [], events: [] };
     }
     const now = new Date();
     const dayStart = new Date(now); dayStart.setHours(CAL_DAY_START_HOUR, 0, 0, 0);
@@ -239,12 +259,13 @@
         singleEvents: 'true',
         orderBy: 'startTime',
       }, t);
-      const events = (data && data.items) || [];
-      const blocks = computeFreeBlocks(events, dayStart.getTime(), dayEnd.getTime(), 10);
+      const rawEvents = (data && data.items) || [];
+      const blocks = computeFreeBlocks(rawEvents, dayStart.getTime(), dayEnd.getTime(), 10);
       const availableMinutes = minutesFreeNow(blocks, Date.now());
-      return { connected: true, availableMinutes, blocks };
+      const events = normalizeEvents(rawEvents);
+      return { connected: true, availableMinutes, blocks, events };
     } catch (e) {
-      return { connected: true, availableMinutes: null, blocks: [], error: true };
+      return { connected: true, availableMinutes: null, blocks: [], events: [], error: true };
     }
   }
 
