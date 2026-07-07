@@ -211,7 +211,15 @@ body::after {
   // "Classifying…" tag. task.classified (persisted) means "AI has filled
   // these fields in"; this Set means "still waiting on that right now."
   const classifyingIds = new Set();
-  const CLASSIFY_CONCURRENCY = 5;
+  const CLASSIFY_BATCH_SIZE = 25;   // tasks per classify-task.js call
+  const CLASSIFY_BATCH_CONCURRENCY = 3; // parallel batch calls for a big paste
+
+  function loadLifeContext() {
+    try {
+      const v = JSON.parse(localStorage.getItem('life_context_v1'));
+      return typeof v === 'string' ? v : '';
+    } catch (e) { return ''; }
+  }
 
   function whenTasksReady(fn) {
     if (window.Tasks) { fn(); return; }
@@ -391,42 +399,66 @@ body::after {
     $('listCount').textContent = all.length === 0 ? '' : (all.length === 1 ? '1 open task' : all.length + ' open tasks');
   }
 
-  // Fire-and-forget classification for one task — always resolves (never
+  // Snapshot of other open tasks (title/domain/ROI only) sent alongside
+  // every classify-task.js call so the model calibrates against a real
+  // workload instead of scoring each new task in isolation — this is what
+  // fixes "everything comes back ROI 6, urgency 5, difficulty 5." Excludes
+  // the tasks currently being classified (they're not "existing" yet).
+  function getExistingTasksForCalibration(excludeIds) {
+    return window.Tasks.getTasks()
+      .filter(t => !t.done && !excludeIds.has(t.id) && t.classified)
+      .slice(-40)
+      .map(t => ({ title: t.title, lifeDomain: t.lifeDomain, longTermROI: t.longTermROI }));
+  }
+
+  // Fire-and-forget classification for one batch — always resolves (never
   // rejects), always ends by clearing classifyingIds and re-rendering, so a
-  // slow or failed classification just leaves the task on its defaults
+  // slow or failed classification just leaves those tasks on their defaults
   // instead of blocking anything.
-  async function classifyOne(id, title) {
-    classifyingIds.add(id);
+  async function classifyBatch(items, lifeContext, existingTasks) {
+    items.forEach(item => classifyingIds.add(item.id));
     renderList();
     try {
       const r = await fetch('/api/classify-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ titles: items.map(i => i.title), lifeContext, existingTasks }),
       });
       const data = await r.json();
-      if (data && data.ok && data.classification) {
-        window.Tasks.updateTask(id, data.classification);
+      if (data && data.ok && Array.isArray(data.classifications)) {
+        items.forEach((item, i) => {
+          const c = data.classifications[i];
+          if (c) window.Tasks.updateTask(item.id, c);
+        });
       }
     } catch (e) {
       // leave defaults — never blocks task creation
     } finally {
-      classifyingIds.delete(id);
+      items.forEach(item => classifyingIds.delete(item.id));
       renderList();
     }
   }
 
-  // Cap concurrent classify-task.js calls so pasting a "massive" list
-  // doesn't fire hundreds of simultaneous requests.
+  // Splits a big paste into CLASSIFY_BATCH_SIZE-sized calls (so one request
+  // isn't classifying 200 tasks with no calibration signal from each other)
+  // and runs a bounded number of those calls in parallel.
   async function classifyQueue(items) {
-    let i = 0;
+    if (items.length === 0) return;
+    const lifeContext = loadLifeContext();
+    const excludeIds = new Set(items.map(i => i.id));
+    const existingTasks = getExistingTasksForCalibration(excludeIds);
+
+    const chunks = [];
+    for (let i = 0; i < items.length; i += CLASSIFY_BATCH_SIZE) chunks.push(items.slice(i, i + CLASSIFY_BATCH_SIZE));
+
+    let idx = 0;
     async function worker() {
-      while (i < items.length) {
-        const item = items[i++];
-        await classifyOne(item.id, item.title);
+      while (idx < chunks.length) {
+        const chunk = chunks[idx++];
+        await classifyBatch(chunk, lifeContext, existingTasks);
       }
     }
-    const workers = Array.from({ length: Math.min(CLASSIFY_CONCURRENCY, items.length) }, worker);
+    const workers = Array.from({ length: Math.min(CLASSIFY_BATCH_CONCURRENCY, chunks.length) }, worker);
     await Promise.all(workers);
   }
 

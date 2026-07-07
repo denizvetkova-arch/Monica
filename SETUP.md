@@ -207,8 +207,17 @@ so it works from every device without re-entering a key on each one.
 |---|---|
 | `ANTHROPIC_API_KEY` | your Anthropic API key |
 
-3. Redeploy. Open **Manage Tasks** → paste a task list into the bulk-add box → each line
-   should show a brief "Classifying…" tag, then fill in with inferred fields.
+3. **Write your Life Context once** — gear icon → Settings → **Life Context** (the first
+   field). A few sentences on your actual goals/projects/priorities right now: current
+   classes and which ones matter most, your career target, what your debate team is working
+   toward, your research project's deadline, financial goals. This is what the classifier
+   reads before scoring anything — without it, every task looks equally important to the
+   model and scores cluster around the middle of the 1–10 range. Update it whenever your
+   priorities actually change; you never edit it per task.
+4. Redeploy. Open **Manage Tasks** → paste a task list into the bulk-add box → tasks show a
+   brief "Classifying…" tag, then fill in with inferred fields. New tasks are classified
+   **together, in one batch**, alongside a sample of your other open tasks — this is what
+   makes scores relative to a real workload instead of each task being guessed in isolation.
 
 > Without this key configured, task creation still works exactly the same — new tasks just
 > keep their defaults (category "personal", medium energy, ROI/urgency/difficulty 5) until

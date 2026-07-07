@@ -222,6 +222,15 @@ body::after {
   font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.2s;
 }
 .set-input:focus { border-color: rgba(255,255,255,0.28); }
+.set-textarea {
+  width: 100%; min-height: 100px; resize: vertical;
+  padding: 11px 13px;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 11px;
+  background: rgba(0,0,0,0.3); color: var(--text-primary);
+  font-family: inherit; font-size: 13.5px; line-height: 1.5; outline: none; transition: border-color 0.2s;
+}
+.set-textarea:focus { border-color: rgba(255,255,255,0.28); }
+.set-textarea::placeholder { color: var(--text-tertiary); }
 .seg { display: flex; border: 1px solid rgba(255,255,255,0.10); border-radius: 11px; overflow: hidden; }
 .seg button { flex: 1; border: 0; background: transparent; color: var(--text-tertiary); font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px 8px; cursor: pointer; transition: background 0.15s, color 0.15s; }
 .seg button.on { background: rgba(255,255,255,0.12); color: var(--text-primary); }
@@ -345,6 +354,16 @@ body::after {
       <span class="modal-title">Settings</span>
       <button class="modal-close" id="settingsClose" type="button" aria-label="Close">×</button>
     </div>
+
+    <div class="field">
+      <label class="field-label">Life Context</label>
+      <textarea class="set-textarea" id="lifeContext" placeholder="A few sentences about your actual goals and priorities right now — e.g. current classes and which ones matter most, your career target, what your debate team is working toward, your research project's deadline, financial goals. Write it once, update it when things change."></textarea>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:7px;line-height:1.5;">
+        This is what makes task scoring meaningful instead of generic — every classification reads this first.
+      </div>
+    </div>
+
+    <div class="section-divider"></div>
 
     <label class="field-label">Google Calendar</label>
     <div class="whoop-box" id="gcalBox">
@@ -647,6 +666,12 @@ body::after {
         syncedKeys: ['health_metrics_v1'],
         onApplied: render,
       });
+      // Small, rarely-changing — its own sync channel so it doesn't ride
+      // along with every task edit.
+      initCloudSync({
+        appKey: 'life_context',
+        syncedKeys: ['life_context_v1'],
+      });
     }
 
     // Recompute urgency chips / ranking as time passes.
@@ -735,6 +760,7 @@ body::after {
     $('age').value = p.age || '';
     $('activity').value = (p.activityHrsPerWeek != null ? p.activityHrsPerWeek : '');
     $('calorieTarget').value = (p.calorieTarget != null ? p.calorieTarget : '');
+    $('lifeContext').value = loadJSON('life_context_v1', '') || '';
   }
 
   /* ---------- save back into po_water_v1 (merge, never overwrite logs) ---------- */
@@ -751,6 +777,7 @@ body::after {
     const calTarget = parseInt($('calorieTarget').value, 10);
     w.profile.calorieTarget = (calTarget > 0 && !isNaN(calTarget)) ? calTarget : null;
     saveJSON(WATER_KEY, w);
+    saveJSON('life_context_v1', $('lifeContext').value.trim());
     const s = $('settingsStatus'); s.textContent = 'Saved ✓';
     setTimeout(() => { s.textContent = ''; }, 1800);
   }
