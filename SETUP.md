@@ -98,7 +98,42 @@ Replace the old URL/key in these files:
 
 ---
 
-## 4. Nova (AI mentor / gym coach) — optional
+## 4. Google Calendar (optional)
+
+Lets the decision screen (`index.html`) see your free/busy time and favor tasks that fit
+the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minutes.
+
+1. Go to **console.cloud.google.com** → create a new project (or pick an existing one).
+2. **APIs & Services → Library** → search **Google Calendar API** → **Enable**.
+3. **APIs & Services → OAuth consent screen**:
+   - User type: **External** (unless you have a Workspace account, then Internal is fine).
+   - App name / support email: anything — this is only ever shown to you.
+   - Scopes: skip (not required for testing mode).
+   - Test users: add your own Google account's email.
+   - Save. (Testing-mode apps work fine forever for a single user — no Google review needed.)
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**:
+   - Application type: **Web application**.
+   - Authorized redirect URIs → **Add URI** → exactly:
+     `https://your-app.vercel.app/api/google-callback`
+     (use your real Vercel domain — add every domain you'll open the site from).
+   - Create. Copy the **Client ID** and **Client secret**.
+5. In Vercel → **Settings → Environment Variables**, add:
+
+| Variable | Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | your OAuth client's Client ID |
+| `GOOGLE_CLIENT_SECRET` | your OAuth client's Client secret (**secret**) |
+
+6. Redeploy. Open the site at that exact domain → **Hub** (gear icon on the home screen) →
+   **Connect Google Calendar**.
+
+> The callback auto-detects the domain, same as WHOOP — no redirect-URI env var needed.
+> Calendar access is **read-only** (`calendar.readonly` scope) — this app never creates,
+> edits, or deletes events.
+
+---
+
+## 5. Nova (AI mentor / gym coach) — optional
 
 No setup or key in the repo. Each user **pastes their own Anthropic API key** on the
 **Nova** tile; it's stored only in their browser and sent straight to Anthropic. Get a key at
@@ -111,4 +146,5 @@ console.anthropic.com.
 2. New Supabase → run the **SQL** above → paste your **URL + anon key** into `sync.js`,
    `topbar.js`, `gym.html`.
 3. (Optional) WHOOP: Client ID in `health.html` + the two env vars in Vercel.
-4. Change the password in `lock.js`. Done.
+4. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
+5. Change the password in `lock.js`. Done.

@@ -305,11 +305,26 @@ body::after {
     return { text: 'Due in ' + days + 'd', cls: '' };
   }
 
-  function render() {
+  function formatFreeMinutes(mins) {
+    if (mins <= 0) return 'Busy right now';
+    if (mins < 60) return mins + 'm free';
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return h + 'h' + (m ? ' ' + m + 'm' : '') + ' free';
+  }
+
+  async function render() {
     if (!window.Tasks) return;
     const tasks = window.Tasks.getTasks();
     const now = Date.now();
-    const ranked = window.Tasks.rankTasks(tasks, { now });
+
+    let availableMinutes = null;
+    let cal = null;
+    try {
+      cal = await window.Tasks.getCalendarContext();
+      if (cal && cal.connected) availableMinutes = cal.availableMinutes;
+    } catch (e) {}
+
+    const ranked = window.Tasks.rankTasks(tasks, { now, availableMinutes });
     const top = ranked[0];
 
     const titleEl = $('nextTitle');
@@ -335,6 +350,9 @@ body::after {
         '<span class="chip">' + task.energyLevel + ' energy</span>',
         '<span class="chip ' + dl.cls + '">' + dl.text + '</span>',
       ];
+      if (cal && cal.connected && cal.availableMinutes != null) {
+        chips.push('<span class="chip">📅 ' + formatFreeMinutes(cal.availableMinutes) + '</span>');
+      }
       metaEl.innerHTML = chips.join('');
       completeBtn.disabled = false;
       skipBtn.disabled = false;

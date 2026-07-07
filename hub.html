@@ -398,6 +398,16 @@ body::after {
       </div>
       <button class="whoop-btn" id="whAction" type="button">Sync now</button>
     </div>
+
+    <div class="section-divider"></div>
+
+    <label class="field-label">Google Calendar</label>
+    <div class="whoop-box" id="gcalBox">
+      <div class="whoop-row">
+        <span class="whoop-status" id="gcalStatus"><span class="dot"></span><span id="gcalStatusText">Not connected</span></span>
+      </div>
+      <button class="whoop-btn" id="gcalAction" type="button">Connect Google Calendar</button>
+    </div>
   </div>
 </div>
 
@@ -411,6 +421,21 @@ body::after {
 
   function loadJSON(k, f) { try { return JSON.parse(localStorage.getItem(k)) || f; } catch (e) { return f; } }
   function saveJSON(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+
+  /* ---------- Google Calendar OAuth redirect handling ---------- */
+  // google-callback.js redirects here (/hub.html#google_access=...) since
+  // this is where the "Connect" button lives — parse it immediately, not
+  // just when the settings modal happens to be open.
+  const GCAL_KEY = 'gcal_tokens_v1';
+  if (location.hash && location.hash.indexOf('google_access') !== -1) {
+    const h = new URLSearchParams(location.hash.slice(1));
+    const access = h.get('google_access'), refresh = h.get('google_refresh');
+    const expires = Number(h.get('google_expires')) || Date.now() + 3500e3;
+    if (access) {
+      saveJSON(GCAL_KEY, { access, refresh, expires });
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  }
 
   // Mirror of topbar.js defaultWaterState so we never clobber the water tracker.
   function defaultWater() {
@@ -483,8 +508,44 @@ body::after {
     setTimeout(() => { s.textContent = ''; }, 1800);
   }
 
+  /* ---------- Google Calendar connect / disconnect ---------- */
+  function renderGcal() {
+    const t = loadJSON(GCAL_KEY, null);
+    const statusEl = $('gcalStatus'), txt = $('gcalStatusText'), action = $('gcalAction');
+    if (!t || !t.access) {
+      statusEl.classList.remove('on'); txt.textContent = 'Not connected';
+      action.textContent = 'Connect Google Calendar';
+    } else {
+      statusEl.classList.add('on'); txt.textContent = 'Connected';
+      action.textContent = 'Disconnect';
+    }
+  }
+  $('gcalAction').addEventListener('click', () => {
+    const t = loadJSON(GCAL_KEY, null);
+    if (t && t.access) {
+      try { localStorage.removeItem(GCAL_KEY); } catch (e) {}
+      renderGcal();
+      return;
+    }
+    const clientId = window.DASH_GOOGLE_CLIENT_ID || '';
+    if (!clientId) {
+      alert("Google Calendar isn't configured yet — set GOOGLE_CLIENT_ID in Vercel (see SETUP.md).");
+      return;
+    }
+    const redirect = window.location.origin + '/api/google-callback';
+    const url = 'https://accounts.google.com/o/oauth2/v2/auth'
+      + '?client_id='     + encodeURIComponent(clientId)
+      + '&redirect_uri='  + encodeURIComponent(redirect)
+      + '&response_type=code'
+      + '&scope='         + encodeURIComponent('https://www.googleapis.com/auth/calendar.readonly')
+      + '&access_type=offline'
+      + '&prompt=consent'
+      + '&state='         + Math.random().toString(36).slice(2);
+    location.href = url;
+  });
+
   /* ---------- open / close ---------- */
-  function open() { populate(); renderWhoop(); $('settingsBg').classList.add('show'); syncWhoop(); }
+  function open() { populate(); renderWhoop(); renderGcal(); $('settingsBg').classList.add('show'); syncWhoop(); }
   function close() { $('settingsBg').classList.remove('show'); }
   $('settingsOpen').addEventListener('click', open);
   $('settingsClose').addEventListener('click', close);
