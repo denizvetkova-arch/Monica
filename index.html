@@ -94,6 +94,21 @@ body::after {
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--text-tertiary); margin-bottom: 10px;
 }
+
+/* ===== Productivity pill ===== */
+.prod-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 12px; margin-bottom: 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+}
+.prod-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #76746E; flex-shrink: 0; }
+.prod-pill.low .dot { background: #FF8A8A; box-shadow: 0 0 8px rgba(255,138,138,0.6); }
+.prod-pill.medium .dot { background: #F2C063; box-shadow: 0 0 8px rgba(242,192,99,0.6); }
+.prod-pill.high .dot { background: #6BE3A4; box-shadow: 0 0 8px rgba(107,227,164,0.6); }
+.prod-pill .factors { color: var(--text-tertiary); font-weight: 500; }
 .next-title {
   font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
   color: var(--text-primary); margin: 0 0 14px; line-height: 1.25;
@@ -237,6 +252,12 @@ body::after {
     </button>
   </div>
 
+  <div class="prod-pill" id="prodPill" style="display:none">
+    <span class="dot"></span>
+    <span id="prodLabel">—</span>
+    <span class="factors" id="prodFactors"></span>
+  </div>
+
   <div class="next-card">
     <div class="next-eyebrow" id="nextEyebrow">Right now</div>
     <h2 class="next-title" id="nextTitle">Loading…</h2>
@@ -275,6 +296,24 @@ body::after {
         <span class="whoop-status" id="gcalStatus"><span class="dot"></span><span id="gcalStatusText">Not connected</span></span>
       </div>
       <button class="whoop-btn" id="gcalAction" type="button">Connect Google Calendar</button>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <label class="field-label">Apple Health</label>
+    <div class="whoop-box">
+      <div class="whoop-row">
+        <span class="whoop-status" id="ahStatus"><span class="dot"></span><span id="ahStatusText">Not set up yet</span></span>
+        <span class="whoop-sync" id="ahSync"></span>
+      </div>
+      <div class="whoop-stats" id="ahStats" style="display:none">
+        <div class="whoop-stat"><div class="v" id="ahSleep">—</div><div class="l">Sleep</div></div>
+        <div class="whoop-stat"><div class="v" id="ahSteps">—</div><div class="l">Steps</div></div>
+        <div class="whoop-stat"><div class="v" id="ahRhr">—</div><div class="l">Rest HR</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:12px;line-height:1.5;">
+        Pushed automatically from the Health Auto Export app — no connect button here. See SETUP.md for setup.
+      </div>
     </div>
 
     <div class="section-divider"></div>
@@ -425,6 +464,18 @@ body::after {
     return { text: 'Due in ' + days + 'd', cls: '' };
   }
 
+  function renderProductivityPill(productivity) {
+    const pill = $('prodPill');
+    if (!productivity || productivity.factors.length === 0) {
+      pill.style.display = 'none';
+      return;
+    }
+    pill.className = 'prod-pill ' + productivity.level;
+    pill.style.display = '';
+    $('prodLabel').textContent = productivity.level.charAt(0).toUpperCase() + productivity.level.slice(1) + ' energy';
+    $('prodFactors').textContent = '· ' + productivity.factors.slice(0, 2).join(', ');
+  }
+
   function formatFreeMinutes(mins) {
     if (mins <= 0) return 'Busy right now';
     if (mins < 60) return mins + 'm free';
@@ -444,7 +495,10 @@ body::after {
       if (cal && cal.connected) availableMinutes = cal.availableMinutes;
     } catch (e) {}
 
-    const ranked = window.Tasks.rankTasks(tasks, { now, availableMinutes });
+    const productivity = window.Tasks.getProductivityContext();
+    renderProductivityPill(productivity);
+
+    const ranked = window.Tasks.rankTasks(tasks, { now, availableMinutes, currentEnergy: productivity.level });
     const top = ranked[0];
 
     const titleEl = $('nextTitle');
@@ -594,6 +648,16 @@ body::after {
         syncedKeys: ['tasks_v1'],
         onApplied: render,
       });
+      // health_metrics_v1 is written server-side by api/health-import.js
+      // (never by this page), so this call is read-only in practice — it
+      // just pulls down whatever Health Auto Export's automation last
+      // posted, and Supabase's realtime subscription (same mechanism as
+      // every other synced key) pushes updates within ~1s of a new import.
+      initCloudSync({
+        appKey: 'health_metrics',
+        syncedKeys: ['health_metrics_v1'],
+        onApplied: render,
+      });
     }
 
     // Recompute urgency chips / ranking as time passes.
@@ -740,8 +804,33 @@ body::after {
     location.href = url;
   });
 
+  /* ---------- Apple Health status (read-only — pushed by the webhook) ---------- */
+  function relTimeAH(ts) {
+    if (!ts) return 'never';
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + ' min ago';
+    if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+    return Math.floor(s / 86400) + ' d ago';
+  }
+  function renderAppleHealth() {
+    const h = loadJSON('health_metrics_v1', null);
+    const statusEl = $('ahStatus'), txt = $('ahStatusText'), syncEl = $('ahSync');
+    if (!h) {
+      statusEl.classList.remove('on'); txt.textContent = 'Not set up yet';
+      syncEl.textContent = ''; $('ahStats').style.display = 'none';
+      return;
+    }
+    statusEl.classList.add('on'); txt.textContent = 'Syncing';
+    syncEl.textContent = 'Last synced ' + relTimeAH(h.updatedAt);
+    $('ahStats').style.display = '';
+    $('ahSleep').textContent = h.sleepHours != null ? h.sleepHours + 'h' : '—';
+    $('ahSteps').textContent = h.steps != null ? h.steps : '—';
+    $('ahRhr').textContent   = h.restingHR != null ? h.restingHR : '—';
+  }
+
   /* ---------- open / close ---------- */
-  function open() { populate(); renderWhoop(); renderGcal(); $('settingsBg').classList.add('show'); syncWhoop(); }
+  function open() { populate(); renderWhoop(); renderGcal(); renderAppleHealth(); $('settingsBg').classList.add('show'); syncWhoop(); }
   function close() { $('settingsBg').classList.remove('show'); }
   $('settingsOpen').addEventListener('click', open);
   $('settingsClose').addEventListener('click', close);

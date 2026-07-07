@@ -269,9 +269,112 @@
     }
   }
 
+  // ---------- Productivity level ----------
+  // Blends Apple Health (via health_metrics_v1, written server-side by
+  // api/health-import.js) with caffeine (already tracked locally by
+  // caffeine.html — no new integration needed, just read its log) into a
+  // single low/medium/high energy signal for the ranking algorithm and a
+  // human-readable summary for display. Every input degrades to a neutral
+  // subscore when missing, so this works with zero, partial, or full data.
+  const HEALTH_METRICS_KEY = 'health_metrics_v1';
+  const CAFFEINE_LOGS_KEY = 'caf:logs';
+  const CAFFEINE_ACTIVE_WINDOW_MS = 5 * 3600000; // caffeine's rough effective window
+
+  function sleepSubscore(h) {
+    if (h == null) return { score: 60, note: null };
+    if (h < 5) return { score: 15, note: h.toFixed(1) + 'h sleep (low)' };
+    if (h < 6) return { score: 35, note: h.toFixed(1) + 'h sleep' };
+    if (h < 7) return { score: 55, note: h.toFixed(1) + 'h sleep' };
+    if (h < 7.5) return { score: 70, note: h.toFixed(1) + 'h sleep' };
+    if (h < 9) return { score: 90, note: h.toFixed(1) + 'h sleep (good)' };
+    return { score: 75, note: h.toFixed(1) + 'h sleep (long)' };
+  }
+
+  function caffeineSubscore(mg) {
+    if (mg == null) return { score: 60, note: null };
+    if (mg <= 0) return { score: 40, note: null };
+    if (mg < 100) return { score: 65, note: Math.round(mg) + 'mg caffeine active' };
+    if (mg < 250) return { score: 85, note: Math.round(mg) + 'mg caffeine active' };
+    if (mg < 400) return { score: 75, note: Math.round(mg) + 'mg caffeine active' };
+    return { score: 50, note: Math.round(mg) + 'mg caffeine (high)' };
+  }
+
+  function stepsSubscore(steps) {
+    if (steps == null) return { score: 60, note: null };
+    if (steps < 1000) return { score: 45, note: null };
+    if (steps < 4000) return { score: 60, note: null };
+    if (steps < 8000) return { score: 75, note: steps + ' steps today' };
+    return { score: 70, note: steps + ' steps today' };
+  }
+
+  function workoutSubscore(workouts, now) {
+    if (!workouts || !workouts.count) return { score: 55, note: null };
+    if (workouts.lastEndedAt && now - workouts.lastEndedAt < 30 * 60000) {
+      return { score: 45, note: 'just finished a workout' };
+    }
+    return { score: 85, note: 'worked out today (' + workouts.minutes + 'm)' };
+  }
+
+  function nutritionSubscore(kcal, now) {
+    if (kcal == null) return { score: 60, note: null };
+    const hour = new Date(now).getHours();
+    if (hour >= 12 && kcal < 400) return { score: 40, note: 'low food intake today' };
+    return { score: 70, note: null };
+  }
+
+  function sumActiveCaffeineMg(now) {
+    const logs = loadJSON(CAFFEINE_LOGS_KEY, null);
+    if (!Array.isArray(logs)) return null;
+    let total = 0;
+    logs.forEach(l => {
+      if (l && typeof l.mg === 'number' && typeof l.ts === 'number' && now - l.ts < CAFFEINE_ACTIVE_WINDOW_MS && now - l.ts >= 0) {
+        total += l.mg;
+      }
+    });
+    return total;
+  }
+
+  function levelFromScore(score) {
+    if (score >= 70) return 'high';
+    if (score >= 45) return 'medium';
+    return 'low';
+  }
+
+  // Returns { level, score, connected, factors } — connected reflects
+  // whether Apple Health data has ever landed (caffeine is always "local"
+  // and doesn't gate this the same way).
+  function getProductivityContext() {
+    const now = Date.now();
+    const health = loadJSON(HEALTH_METRICS_KEY, null);
+    const activeCaffeineMg = sumActiveCaffeineMg(now);
+
+    const sleep = sleepSubscore(health && health.sleepHours);
+    const caffeine = caffeineSubscore(activeCaffeineMg);
+    const steps = stepsSubscore(health && health.steps);
+    const workout = workoutSubscore(health && health.workoutsToday, now);
+    const nutrition = nutritionSubscore(health && health.dietaryEnergyKcal, now);
+
+    const weighted = [
+      [sleep, 40], [caffeine, 20], [steps, 15], [workout, 15], [nutrition, 10],
+    ];
+    const totalWeight = weighted.reduce((s, [, w]) => s + w, 0);
+    const score = Math.round(weighted.reduce((s, [sub, w]) => s + sub.score * w, 0) / totalWeight);
+
+    const factors = weighted.map(([sub]) => sub.note).filter(Boolean);
+
+    return {
+      level: levelFromScore(score),
+      score,
+      connected: !!health,
+      factors,
+      updatedAt: health && health.updatedAt || null,
+    };
+  }
+
   window.Tasks = {
     CATEGORIES,
     ENERGY_LEVELS,
+    getProductivityContext,
     getTasks,
     setTasks,
     addTask,

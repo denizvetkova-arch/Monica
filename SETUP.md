@@ -1,7 +1,7 @@
 # Dashboard — Setup Guide (fork → deploy in ~5 min)
 
 This is a static dashboard (plain HTML/JS) that deploys on **Vercel** and syncs across your
-devices with **Supabase**. WHOOP is an optional add-on.
+devices with **Supabase**. WHOOP, Apple Health, and Google Calendar are optional add-ons.
 
 ---
 
@@ -98,7 +98,50 @@ Replace the old URL/key in these files:
 
 ---
 
-## 4. Google Calendar (optional)
+## 4. Apple Health (optional)
+
+Feeds sleep, steps, resting heart rate, workouts, and nutrition (calories/protein) into the
+"Productivity Level" pill on the decision screen (`index.html`), which nudges task ranking
+toward lighter work on a rough night and deep work when you're rested. There's no OAuth here
+— Apple doesn't let any web app read HealthKit data directly, so a small iOS app called
+**Health Auto Export** (~$5, one-time, App Store) acts as the bridge: it posts a JSON export
+to a webhook on a schedule. "Continuous" in practice means Health Auto Export's own
+background-delivery automation, which iOS batches — expect updates every so often through
+the day, not truly instant.
+
+1. Pick a secret string yourself (anything — a password generator output is fine). This is
+   **your token**, not something Apple or Health Auto Export gives you.
+2. In Vercel → **Settings → Environment Variables**, add:
+
+| Variable | Value |
+|---|---|
+| `HEALTH_IMPORT_TOKEN` | the secret string you picked |
+
+   Redeploy after adding it.
+3. Install **Health Auto Export** on your iPhone → grant it Health access for at least:
+   Sleep Analysis, Steps, Resting Heart Rate, Active Energy, and (if you log food into
+   Apple Health via a calorie app like Cal AI) Dietary Energy + Protein.
+4. In the app: **Automations → New Automation → REST API**.
+   - URL: `https://monica-zeta-blue.vercel.app/api/health-import?token=YOUR_TOKEN`
+     (use the secret from step 1).
+   - Method: **POST**, format **JSON**.
+   - Metrics: select the ones listed in step 3 (more is fine — anything not recognized is
+     safely ignored).
+   - Trigger: **Automatic** (background delivery) for the closest thing to continuous sync;
+     a fixed interval (e.g. hourly) also works and is more predictable.
+5. Run the automation once manually to confirm it works, then open the site → gear icon →
+   **Settings** → **Apple Health** box should flip to "Syncing" with a few stats filled in.
+
+> The webhook **discards the raw payload** after extracting aggregate numbers — it never
+> stores minute-by-minute samples or workout GPS routes, only daily totals/averages.
+> If a metric isn't showing up, check [`api/health-import.js`](api/health-import.js)'s
+> `normalizeHealthPayload()` — Health Auto Export's exact field names have shifted across
+> versions, and that function may need a field-name tweak to match your export (use the
+> app's "Preview Data" screen on your automation to see the real payload shape).
+
+---
+
+## 5. Google Calendar (optional)
 
 Lets the decision screen (`index.html`) see your free/busy time and favor tasks that fit
 the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minutes.
@@ -114,8 +157,7 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**:
    - Application type: **Web application**.
    - Authorized redirect URIs → **Add URI** → exactly:
-     `https://your-app.vercel.app/api/google-callback`
-     (use your real Vercel domain — add every domain you'll open the site from).
+     `https://monica-zeta-blue.vercel.app/api/google-callback`
    - Create. Copy the **Client ID** and **Client secret**.
 5. In Vercel → **Settings → Environment Variables**, add:
 
@@ -124,16 +166,20 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 | `GOOGLE_CLIENT_ID` | your OAuth client's Client ID |
 | `GOOGLE_CLIENT_SECRET` | your OAuth client's Client secret (**secret**) |
 
-6. Redeploy. Open the site at that exact domain → tap the **gear icon** on the home screen →
-   **Connect Google Calendar**.
+6. Redeploy. Open the site → tap the **gear icon** on the home screen → **Connect Google Calendar**.
 
-> The callback auto-detects the domain, same as WHOOP — no redirect-URI env var needed.
+> Unlike WHOOP, the redirect URI here is a **fixed constant** in the code
+> (`https://monica-zeta-blue.vercel.app/api/google-callback`), not auto-detected from the
+> domain — Google requires an exact match against the one URI registered above, so opening
+> the site via a Vercel preview URL will not work for this feature. If you ever fork this to
+> a different domain, update the hardcoded URL in both `index.html` and
+> `api/google-callback.js` to match, and add the new URI in Google Cloud Console too.
 > Calendar access is **read-only** (`calendar.readonly` scope) — this app never creates,
 > edits, or deletes events.
 
 ---
 
-## 5. Nova (AI mentor / gym coach) — optional
+## 6. Nova (AI mentor / gym coach) — optional
 
 No setup or key in the repo. Each user **pastes their own Anthropic API key** on the
 **Nova** tile; it's stored only in their browser and sent straight to Anthropic. Get a key at
@@ -146,5 +192,7 @@ console.anthropic.com.
 2. New Supabase → run the **SQL** above → paste your **URL + anon key** into `sync.js`,
    `topbar.js`, `gym.html`.
 3. (Optional) WHOOP: Client ID in `health.html` + the two env vars in Vercel.
-4. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
-5. Change the password in `lock.js`. Done.
+4. (Optional) Apple Health: pick a secret token, set `HEALTH_IMPORT_TOKEN` in Vercel, point
+   Health Auto Export's automation at `/api/health-import?token=...`.
+5. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
+6. Change the password in `lock.js`. Done.
