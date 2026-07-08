@@ -41,6 +41,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const CATEGORIES = ['career', 'school', 'debate', 'glp1_research', 'finance', 'personal', 'extracurricular', 'health'];
 const ENERGY_LEVELS = ['low', 'medium', 'high'];
+const RECURRENCE_VALUES = ['none', 'daily', 'weekly', 'monthly'];
 const MAX_TITLES_PER_CALL = 40; // caller (manage.html) chunks larger batches into multiple calls
 const MAX_EXISTING_TASKS = 40;
 const MAX_CORRECTIONS = 25;
@@ -67,8 +68,12 @@ const BATCH_SCHEMA = {
             type: 'integer',
             description: '1-100: how confident you are in THIS classification. Score lower (below 90) when the title is ambiguous, generic, or does not clearly match the life context / preference examples / existing tasks provided. Score higher when it clearly matches a stated priority or a previously-confirmed pattern. Do not default to a high number out of politeness — low confidence is the correct, useful answer when a task is genuinely unclear.',
           },
+          recurrence: {
+            type: 'string', enum: RECURRENCE_VALUES,
+            description: 'Only "daily"/"weekly"/"monthly" if this is genuinely a recurring habit, routine chore, or regularly repeating obligation (e.g. "take vitamins", "water plants", "pay rent"). "none" for one-off tasks — this is most tasks; do not guess a recurrence just because a task sounds routine.',
+          },
         },
-        required: ['title', 'lifeDomain', 'schoolClass', 'longTermROI', 'urgency', 'difficulty', 'estimatedMinutes', 'energyLevel', 'confidence'],
+        required: ['title', 'lifeDomain', 'schoolClass', 'longTermROI', 'urgency', 'difficulty', 'estimatedMinutes', 'energyLevel', 'confidence', 'recurrence'],
         additionalProperties: false,
       },
     },
@@ -101,6 +106,7 @@ export function processClassificationResponse(titles, rawList) {
       estimatedMinutes: clampInt(match.estimatedMinutes, 1, 480, 30),
       energyLevel: ENERGY_LEVELS.includes(match.energyLevel) ? match.energyLevel : 'medium',
       confidence: clampInt(match.confidence, 1, 100, DEFAULT_CONFIDENCE),
+      recurrence: RECURRENCE_VALUES.includes(match.recurrence) && match.recurrence !== 'none' ? match.recurrence : null,
     };
   });
 }
@@ -145,7 +151,7 @@ export function buildPrompt(titles, lifeContext, existingTasks, corrections, com
     titles.map((t, i) => (i + 1) + '. "' + t + '"').join('\n');
 
   return contextBlock + existingBlock + correctionsBlock + completionsBlock + newBlock + '\n\n' +
-    'For each task, infer: lifeDomain, schoolClass, longTermROI, urgency, difficulty, estimatedMinutes, energyLevel, confidence. ' +
+    'For each task, infer: lifeDomain, schoolClass, longTermROI, urgency, difficulty, estimatedMinutes, energyLevel, confidence, recurrence. ' +
     'IMPORTANT: spread your scores across the full 1-10 range based on real differences between these tasks and the ' +
     'life context above — do not cluster everything at 5 or 6. A routine errand unrelated to any stated priority should ' +
     'score low ROI; a task tied to a stated goal, deadline, or high-stakes project should score high. Report confidence ' +

@@ -242,6 +242,21 @@ body::after {
 .set-save:active { transform: translateY(1px); }
 .fb-skip-link { display: block; text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 12px; cursor: pointer; }
 .fb-skip-link:hover { color: var(--text-primary); }
+
+/* ===== Reclassify Entire Database ===== */
+.btn-secondary-wide {
+  width: 100%; padding: 12px 20px; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05);
+  color: var(--text-primary); font-family: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-secondary-wide:hover { background: rgba(255,255,255,0.09); }
+.btn-secondary-wide:disabled { opacity: 0.4; cursor: not-allowed; }
+.reclassify-progress { margin-top: 14px; }
+.reclassify-progress-bar { height: 8px; border-radius: 6px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.reclassify-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #E07658, #FAFAFA); transition: width 0.25s ease; }
+.reclassify-progress-label { font-size: 11.5px; color: var(--text-tertiary); margin-top: 7px; text-align: center; }
+.reclassify-status { font-size: 12px; color: var(--success); margin-top: 10px; min-height: 16px; text-align: center; }
 </style>
 </head>
 <body>
@@ -261,6 +276,17 @@ body::after {
     <textarea class="bulk-textarea" id="bulkInput" placeholder="Paste your whole to-do list here, one task per line…"></textarea>
     <div class="bulk-hint">Each line becomes a task — AI classifies category, ROI, urgency, difficulty, and estimated time automatically (a few seconds per task). Refine any of it below if it's wrong.</div>
     <button class="btn-primary" id="bulkAddBtn" type="button">Add All Lines</button>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Reclassify</div>
+    <div class="bulk-hint" id="reclassifyHint">Checking…</div>
+    <button class="btn-secondary-wide" id="reclassifyBtn" type="button" disabled>Reclassify Entire Database</button>
+    <div class="reclassify-progress" id="reclassifyProgress" style="display:none">
+      <div class="reclassify-progress-bar"><div class="reclassify-progress-fill" id="reclassifyFill"></div></div>
+      <div class="reclassify-progress-label" id="reclassifyLabel"></div>
+    </div>
+    <div class="reclassify-status" id="reclassifyStatus"></div>
   </div>
 
   <div class="card">
@@ -324,6 +350,7 @@ body::after {
   // approve/fix card, per the "delete the always-on dropdowns" ask.
   const editingIds = new Set();
   const fixingIds = new Set();
+  let reclassifyRunning = false;
 
   function loadLifeContext() {
     try {
@@ -693,6 +720,7 @@ body::after {
     all.forEach(t => listEl.appendChild(buildRow(t)));
     $('emptyHint').style.display = all.length === 0 ? 'block' : 'none';
     $('listCount').textContent = all.length === 0 ? '' : (all.length === 1 ? '1 open task' : all.length + ' open tasks');
+    updateReclassifyUI();
   }
 
   // Snapshot of other open tasks (title/domain/ROI only) sent alongside
@@ -711,7 +739,7 @@ body::after {
   // rejects), always ends by clearing classifyingIds and re-rendering, so a
   // slow or failed classification just leaves those tasks on their defaults
   // instead of blocking anything.
-  async function classifyBatch(items, lifeContext, existingTasks, corrections, completions) {
+  async function classifyBatch(items, lifeContext, existingTasks, corrections, completions, onBatchDone) {
     items.forEach(item => classifyingIds.add(item.id));
     renderList();
     try {
@@ -735,13 +763,17 @@ body::after {
     } finally {
       items.forEach(item => classifyingIds.delete(item.id));
       renderList();
+      if (onBatchDone) onBatchDone(items.length);
     }
   }
 
   // Splits a big paste into CLASSIFY_BATCH_SIZE-sized calls (so one request
   // isn't classifying 200 tasks with no calibration signal from each other)
-  // and runs a bounded number of those calls in parallel.
-  async function classifyQueue(items) {
+  // and runs a bounded number of those calls in parallel. onBatchDone(n) is
+  // called after each chunk resolves (success or failure) with how many
+  // items it covered — used by the Reclassify Entire Database progress bar;
+  // regular bulk-add doesn't pass one.
+  async function classifyQueue(items, onBatchDone) {
     if (items.length === 0) return;
     const lifeContext = loadLifeContext();
     const excludeIds = new Set(items.map(i => i.id));
@@ -759,7 +791,7 @@ body::after {
     async function worker() {
       while (idx < chunks.length) {
         const chunk = chunks[idx++];
-        await classifyBatch(chunk, lifeContext, existingTasks, corrections, completions);
+        await classifyBatch(chunk, lifeContext, existingTasks, corrections, completions, onBatchDone);
       }
     }
     const workers = Array.from({ length: Math.min(CLASSIFY_BATCH_CONCURRENCY, chunks.length) }, worker);
@@ -776,9 +808,70 @@ body::after {
     });
   }
 
+  // ===== Reclassify Entire Database =====
+  // Finds every task scored by an older classifier version (or never
+  // scored) and re-runs it through classify-task.js from scratch, ignoring
+  // whatever metadata it currently has — the fix for tasks stuck showing
+  // generic pre-AI-Training-Mode defaults (personal/medium/ROI 6/urgency 5/
+  // difficulty 5) that a plain re-render can never correct on its own,
+  // since nothing else ever revisits an already-"classified" task.
+  function getStaleTasks() {
+    return window.Tasks.getTasks().filter(window.Tasks.needsReclassification);
+  }
+
+  function updateReclassifyUI() {
+    if (reclassifyRunning) return; // don't fight the progress bar mid-run
+    const stale = getStaleTasks();
+    const hint = $('reclassifyHint');
+    const btn = $('reclassifyBtn');
+    if (stale.length === 0) {
+      hint.textContent = 'Every task is scored by the current AI classifier.';
+      btn.disabled = true;
+    } else {
+      hint.textContent = stale.length + ' task' + (stale.length === 1 ? '' : 's') +
+        ' still have old or generic metadata (e.g. personal / medium energy / ROI 6 / urgency 5 / difficulty 5) — reclassify to fix.';
+      btn.disabled = false;
+    }
+  }
+
+  function showReclassifyProgress(done, total) {
+    $('reclassifyProgress').style.display = '';
+    $('reclassifyFill').style.width = Math.round((done / total) * 100) + '%';
+    $('reclassifyLabel').textContent = 'Reclassifying ' + done + ' of ' + total + '…';
+  }
+  function hideReclassifyProgress() {
+    $('reclassifyProgress').style.display = 'none';
+  }
+
+  function wireReclassify() {
+    $('reclassifyBtn').addEventListener('click', async () => {
+      const stale = getStaleTasks();
+      if (stale.length === 0) return;
+      reclassifyRunning = true;
+      $('reclassifyBtn').disabled = true;
+      $('reclassifyStatus').textContent = '';
+      showReclassifyProgress(0, stale.length);
+      let done = 0;
+      await classifyQueue(stale.map(t => ({ id: t.id, title: t.title })), (n) => {
+        done = Math.min(done + n, stale.length);
+        showReclassifyProgress(done, stale.length);
+      });
+      hideReclassifyProgress();
+      reclassifyRunning = false;
+      // Every applyClassification call already fired 'tasks-changed', so any
+      // open decision screen (index.html) has been re-ranking against the
+      // new metadata live, batch by batch — ranking is computed fresh from
+      // storage on every read, there's no separate "rerank" step to trigger.
+      $('reclassifyStatus').textContent = 'Reclassified ' + stale.length + ' task' + (stale.length === 1 ? '' : 's') + '. Rankings are already up to date.';
+      updateReclassifyUI();
+      renderList();
+    });
+  }
+
   whenTasksReady(function () {
     wireBulkAdd();
     wireFeedbackModal();
+    wireReclassify();
     renderList();
     window.addEventListener('tasks-changed', renderList);
     window.addEventListener('storage', renderList);

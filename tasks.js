@@ -21,6 +21,14 @@
   const CATEGORIES = ['career', 'school', 'debate', 'glp1_research', 'finance', 'personal', 'extracurricular', 'health'];
   const ENERGY_LEVELS = ['low', 'medium', 'high'];
 
+  // Bump this whenever classify-task.js's scoring changes meaningfully
+  // (e.g. the AI Training Mode rewrite that added confidence/Preference
+  // Model grounding). A task's stamped classificationVersion lets Monica
+  // tell "confidently classified under the CURRENT model" apart from
+  // "classified under an older, generic-scoring model" without ever
+  // needing the user to flag anything by hand — see needsReclassification.
+  const CLASSIFICATION_VERSION = 2;
+
   function loadJSON(key, fallback) {
     try {
       const v = JSON.parse(localStorage.getItem(key));
@@ -58,6 +66,17 @@
     if (m.needsReview === undefined) m.needsReview = false;
     if (m.predictionConfidence === undefined) m.predictionConfidence = null;
     if (m.pendingPrediction === undefined) m.pendingPrediction = null;
+    if (m.recurrence === undefined) m.recurrence = null;
+    if (m.classificationVersion == null) {
+      // Tasks classified before this field existed were scored by an older,
+      // generic version of classify-task.js (no confidence, no Preference
+      // Model grounding) — treat them as version 1, which is always stale
+      // against the current CLASSIFICATION_VERSION. Never-classified tasks
+      // are version 0, also stale. Either way this is what lets
+      // "Reclassify Entire Database" find every task that needs it without
+      // the user marking anything.
+      m.classificationVersion = m.classified ? 1 : 0;
+    }
     return m;
   }
 
@@ -89,9 +108,13 @@
       createdAt: Date.now(),
       completedAt: null,
       snoozedUntil: null,
+      recurrence: null,
       // True once classify-task.js has filled in the fields above from the
       // title — false means the row is still showing inferred defaults.
       classified: !!partial.classified,
+      // 0 = never classified — always stale, always picked up by
+      // "Reclassify Entire Database" and by the normal bulk-add flow.
+      classificationVersion: 0,
     };
     list.push(task);
     setTasks(list);
@@ -188,7 +211,15 @@
     return corrected.concat(other);
   }
 
-  const CLASSIFICATION_FIELDS = ['lifeDomain', 'schoolClass', 'longTermROI', 'urgency', 'difficulty', 'estimatedMinutes', 'energyLevel'];
+  // True for anything scored by an older classifier version (or never
+  // scored at all) — what "Reclassify Entire Database" targets. Doesn't
+  // look at task.done: completed tasks keep their real metadata too, since
+  // historical-productivity/duration-calibration signals read from them.
+  function needsReclassification(task) {
+    return task.classificationVersion == null || task.classificationVersion < CLASSIFICATION_VERSION;
+  }
+
+  const CLASSIFICATION_FIELDS = ['lifeDomain', 'schoolClass', 'longTermROI', 'urgency', 'difficulty', 'estimatedMinutes', 'energyLevel', 'recurrence'];
   function pickClassificationFields(obj) {
     const out = {};
     CLASSIFICATION_FIELDS.forEach(k => { out[k] = obj[k] != null ? obj[k] : null; });
@@ -206,8 +237,13 @@
     const fields = pickClassificationFields(classification);
     const confidence = classification.confidence != null ? classification.confidence : 60;
     const needsReview = confidence < 90;
+    // Only these classification fields are ever touched — deadline, done/
+    // completedAt, notes, subtasks, and anything else on the task object
+    // pass straight through untouched, whatever this classifier version
+    // does or doesn't know about them.
     const task = updateTask(id, Object.assign({}, fields, {
       classified: true,
+      classificationVersion: CLASSIFICATION_VERSION,
       predictionConfidence: confidence,
       needsReview,
       pendingPrediction: needsReview ? fields : null,
@@ -228,7 +264,7 @@
     const prediction = task.pendingPrediction || pickClassificationFields(task);
     const isCorrection = correctedFields != null;
     const finalFields = isCorrection ? pickClassificationFields(correctedFields) : prediction;
-    const updated = updateTask(id, Object.assign({}, finalFields, { needsReview: false, pendingPrediction: null }));
+    const updated = updateTask(id, Object.assign({}, finalFields, { needsReview: false, pendingPrediction: null, classificationVersion: CLASSIFICATION_VERSION }));
     logCorrection({
       title: task.title,
       prediction,
@@ -672,6 +708,8 @@
   window.Tasks = {
     CATEGORIES,
     ENERGY_LEVELS,
+    CLASSIFICATION_VERSION,
+    needsReclassification,
     getEnergyContext,
     getProductivityContext,
     getCaffeineContext,
