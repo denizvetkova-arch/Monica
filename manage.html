@@ -170,6 +170,78 @@ body::after {
 
 .empty-hint { text-align: center; font-size: 13px; color: var(--text-tertiary); padding: 20px 0; }
 .list-count { font-size: 12px; color: var(--text-tertiary); margin-bottom: 12px; }
+
+/* ===== Compact row summary (classified, not under review) ===== */
+.compact-summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding-left: 30px;
+}
+.compact-summary-text { font-size: 12.5px; color: var(--text-secondary); }
+.edit-toggle-btn, .edit-done-btn {
+  border: 1px solid rgba(255,255,255,0.10); background: transparent;
+  color: var(--text-tertiary); font-family: inherit; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; border-radius: 8px;
+  padding: 5px 10px; cursor: pointer; flex-shrink: 0; transition: background 0.15s, color 0.15s;
+}
+.edit-toggle-btn:hover, .edit-done-btn:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+.edit-done-btn { margin: 10px 0 0 30px; }
+
+/* ===== Needs-review card ===== */
+.review-card {
+  margin-left: 30px; padding: 12px 14px;
+  background: rgba(224,118,88,0.07); border: 1px solid rgba(224,118,88,0.28);
+  border-radius: 12px;
+}
+.review-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: #E07658; margin-bottom: 6px; }
+.review-actions { display: flex; gap: 8px; margin-top: 10px; }
+.review-ok-btn, .review-fix-btn {
+  border: 0; border-radius: 9px; padding: 8px 14px; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 700;
+}
+.review-ok-btn { background: linear-gradient(180deg, #FFFFFF 0%, #E8E5DD 100%); color: #0A0A0B; }
+.review-ok-btn:hover { filter: brightness(1.05); }
+.review-fix-btn { background: rgba(255,255,255,0.06); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.10); }
+.review-fix-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+
+/* ===== Completion feedback modal (shared pattern with index.html) ===== */
+.modal-bg {
+  position: fixed; inset: 0; z-index: 120; display: none;
+  align-items: center; justify-content: center; padding: 20px;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.modal-bg.show { display: flex; }
+.modal {
+  width: 100%; max-width: 440px; max-height: 88vh; overflow-y: auto;
+  background: #0e0e10; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px; padding: 22px; box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.modal-title { font-size: 18px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
+.modal-close { border: 0; background: transparent; color: var(--text-tertiary); font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.modal-close:hover { color: var(--text-primary); }
+.field { margin-bottom: 14px; }
+.field-label { font-size: 11px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 7px; display: block; }
+.set-input {
+  width: 100%; padding: 11px 13px;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 11px;
+  background: rgba(0,0,0,0.3); color: var(--text-primary);
+  font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.2s;
+}
+.set-input:focus { border-color: rgba(255,255,255,0.28); }
+.seg { display: flex; border: 1px solid rgba(255,255,255,0.10); border-radius: 11px; overflow: hidden; }
+.seg button { flex: 1; border: 0; background: transparent; color: var(--text-tertiary); font-family: inherit; font-size: 12.5px; font-weight: 600; padding: 11px 6px; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.seg button.on { background: rgba(255,255,255,0.12); color: var(--text-primary); }
+.set-save {
+  width: 100%; margin-top: 6px; padding: 13px; border: 0; border-radius: 12px;
+  background: linear-gradient(180deg,#FFFFFF,#E8E5DD); color: #0A0A0B;
+  font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 22px rgba(0,0,0,0.25);
+  transition: filter 0.15s, transform 0.1s;
+}
+.set-save:hover { filter: brightness(1.05); }
+.set-save:active { transform: translateY(1px); }
+.fb-skip-link { display: block; text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 12px; cursor: pointer; }
+.fb-skip-link:hover { color: var(--text-primary); }
 </style>
 </head>
 <body>
@@ -200,6 +272,38 @@ body::after {
 
 </div>
 
+<!-- ===== Completion feedback modal ===== -->
+<div class="modal-bg" id="feedbackBg">
+  <div class="modal" role="dialog" aria-label="Task feedback">
+    <div class="modal-head">
+      <span class="modal-title">How did it go?</span>
+      <button class="modal-close" id="feedbackClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="field">
+      <label class="field-label">Actual minutes</label>
+      <input class="set-input" id="fbMinutes" type="number" min="1" inputmode="numeric">
+    </div>
+    <div class="field">
+      <label class="field-label">How did it feel?</label>
+      <div class="seg" id="fbFeelingSeg">
+        <button type="button" data-f="great">Great</button>
+        <button type="button" data-f="fine">Fine</button>
+        <button type="button" data-f="neutral">Neutral</button>
+        <button type="button" data-f="drained">Drained</button>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">Completion</label>
+      <div class="seg" id="fbDoneSeg">
+        <button type="button" data-d="full" class="on">Fully done</button>
+        <button type="button" data-d="subtask">Part of bigger project</button>
+      </div>
+    </div>
+    <button class="set-save" id="fbSubmit" type="button">Save &amp; Complete</button>
+    <span class="fb-skip-link" id="fbSkip">Skip — just mark complete</span>
+  </div>
+</div>
+
 <script>
 (function () {
   'use strict';
@@ -213,6 +317,13 @@ body::after {
   const classifyingIds = new Set();
   const CLASSIFY_BATCH_SIZE = 25;   // tasks per classify-task.js call
   const CLASSIFY_BATCH_CONCURRENCY = 3; // parallel batch calls for a big paste
+
+  // In-memory only — which classified rows are toggled open for manual edit,
+  // and which needs-review cards are toggled into "Fix" mode. Both default
+  // closed: classified tasks show a compact summary, review tasks show the
+  // approve/fix card, per the "delete the always-on dropdowns" ask.
+  const editingIds = new Set();
+  const fixingIds = new Set();
 
   function loadLifeContext() {
     try {
@@ -234,6 +345,80 @@ body::after {
     const d = new Date(iso);
     const pad = (n) => String(n).padStart(2, '0');
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function formatDeadline(iso) {
+    const d = new Date(iso);
+    return 'Due ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' +
+      d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  // One-line read-only summary for a classified task — this is what replaces
+  // the always-on dropdown grid as the default row state.
+  function formatCompactSummary(task) {
+    const parts = [(CATEGORY_EMOJI[task.lifeDomain] || '') + ' ' + task.lifeDomain];
+    if (task.schoolClass) parts.push(task.schoolClass);
+    parts.push('ROI ' + task.longTermROI);
+    parts.push(task.energyLevel + ' energy');
+    parts.push(task.estimatedMinutes + 'm');
+    if (task.deadline) parts.push(formatDeadline(task.deadline));
+    return parts.join(' · ');
+  }
+
+  // ===== Completion feedback modal =====
+  let fbTaskId = null;
+  let fbCancel = null; // called if the user closes the modal without completing
+  let fbFeeling = null;
+  let fbDone = 'full';
+
+  function openFeedbackModal(task, onCancel) {
+    fbTaskId = task.id;
+    fbCancel = onCancel || null;
+    fbFeeling = null;
+    fbDone = 'full';
+    $('fbMinutes').value = task.estimatedMinutes || '';
+    document.querySelectorAll('#fbFeelingSeg button').forEach(b => b.classList.remove('on'));
+    document.querySelectorAll('#fbDoneSeg button').forEach(b => b.classList.toggle('on', b.dataset.d === 'full'));
+    $('feedbackBg').classList.add('show');
+  }
+  function closeFeedbackModal() {
+    $('feedbackBg').classList.remove('show');
+    fbTaskId = null; fbCancel = null;
+  }
+  function wireFeedbackModal() {
+    document.querySelectorAll('#fbFeelingSeg button').forEach(b => {
+      b.addEventListener('click', () => {
+        fbFeeling = b.dataset.f;
+        document.querySelectorAll('#fbFeelingSeg button').forEach(x => x.classList.toggle('on', x === b));
+      });
+    });
+    document.querySelectorAll('#fbDoneSeg button').forEach(b => {
+      b.addEventListener('click', () => {
+        fbDone = b.dataset.d;
+        document.querySelectorAll('#fbDoneSeg button').forEach(x => x.classList.toggle('on', x === b));
+      });
+    });
+    $('feedbackClose').addEventListener('click', () => {
+      const cancel = fbCancel;
+      closeFeedbackModal();
+      if (cancel) cancel();
+    });
+    $('fbSkip').addEventListener('click', () => {
+      const id = fbTaskId;
+      closeFeedbackModal();
+      if (id) { window.Tasks.completeTask(id); renderList(); }
+    });
+    $('fbSubmit').addEventListener('click', () => {
+      const id = fbTaskId;
+      const minutes = parseInt($('fbMinutes').value, 10);
+      const feedback = {
+        actualMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : null,
+        feeling: fbFeeling,
+        wasSubtask: fbDone === 'subtask',
+      };
+      closeFeedbackModal();
+      if (id) { window.Tasks.completeTask(id, feedback); renderList(); }
+    });
   }
 
   // Small "LABEL [input]" control used for ROI/urgency/difficulty — bare
@@ -260,70 +445,9 @@ body::after {
     return wrap;
   }
 
-  function buildRow(task) {
-    const row = document.createElement('div');
-    row.className = 'task-row';
-    row.dataset.id = task.id;
-
-    const top = document.createElement('div');
-    top.className = 'task-row-top';
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'task-done-cb';
-    cb.addEventListener('change', () => {
-      if (cb.checked) window.Tasks.completeTask(task.id);
-      renderList();
-    });
-    top.appendChild(cb);
-
-    const title = document.createElement('span');
-    title.className = 'task-title';
-    title.textContent = task.title;
-    title.setAttribute('contenteditable', 'false');
-    title.addEventListener('click', () => {
-      if (title.getAttribute('contenteditable') === 'true') return;
-      title.setAttribute('contenteditable', 'true');
-      title.focus();
-      const range = document.createRange();
-      range.selectNodeContents(title);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel.removeAllRanges(); sel.addRange(range);
-    });
-    function commitTitle() {
-      title.removeAttribute('contenteditable');
-      const next = title.textContent.trim();
-      if (next && next !== task.title) window.Tasks.updateTask(task.id, { title: next });
-      else title.textContent = task.title;
-    }
-    title.addEventListener('blur', commitTitle);
-    title.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); title.blur(); }
-      if (e.key === 'Escape') { e.preventDefault(); title.textContent = task.title; title.blur(); }
-    });
-    top.appendChild(title);
-
-    if (classifyingIds.has(task.id)) {
-      const tag = document.createElement('span');
-      tag.className = 'classifying-tag';
-      tag.textContent = 'Classifying…';
-      top.appendChild(tag);
-    }
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'task-delete';
-    del.textContent = '×';
-    del.setAttribute('aria-label', 'Delete task');
-    del.addEventListener('click', () => {
-      window.Tasks.removeTask(task.id);
-      renderList();
-    });
-    top.appendChild(del);
-
-    row.appendChild(top);
-
+  // The always-on dropdown/number-input grid — still exists, but is now
+  // demoted from "the default row" to "what Edit / Fix reveals on demand."
+  function buildFieldsGrid(task) {
     const fields = document.createElement('div');
     fields.className = 'task-fields';
 
@@ -380,7 +504,179 @@ body::after {
     });
     fields.appendChild(dlInput);
 
-    row.appendChild(fields);
+    return fields;
+  }
+
+  // Default state for an already-classified, non-review task: a compact
+  // read-only line + an Edit toggle — replaces the always-visible grid.
+  function buildCompactSummary(task) {
+    const wrap = document.createElement('div');
+    wrap.className = 'compact-summary';
+    const text = document.createElement('span');
+    text.className = 'compact-summary-text';
+    text.textContent = formatCompactSummary(task);
+    wrap.appendChild(text);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'edit-toggle-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => { editingIds.add(task.id); renderList(); });
+    wrap.appendChild(editBtn);
+    return wrap;
+  }
+
+  // The field grid plus a "Done" collapse button — used when a classified
+  // row has been toggled into Edit mode.
+  function buildEditableSection(task) {
+    const container = document.createElement('div');
+    container.appendChild(buildFieldsGrid(task));
+    // Only classified tasks have a compact view to collapse back to —
+    // unclassified tasks (no API key configured, or still awaiting a
+    // response) show this grid as their only state, same as before.
+    if (task.classified) {
+      const doneBtn = document.createElement('button');
+      doneBtn.type = 'button';
+      doneBtn.className = 'edit-done-btn';
+      doneBtn.textContent = 'Done';
+      doneBtn.addEventListener('click', () => { editingIds.delete(task.id); renderList(); });
+      container.appendChild(doneBtn);
+    }
+    return container;
+  }
+
+  // Low-confidence classification: shows the prediction + confidence and
+  // asks for a one-tap approve, or "Fix" to correct it. This — not an
+  // always-editable grid — is what "AI Training Mode" surfaces by default.
+  function buildReviewCard(task) {
+    const card = document.createElement('div');
+    card.className = 'review-card';
+
+    if (!fixingIds.has(task.id)) {
+      const label = document.createElement('div');
+      label.className = 'review-label';
+      label.textContent = 'AI predicted (' + task.predictionConfidence + '% confident):';
+      card.appendChild(label);
+
+      const summary = document.createElement('div');
+      summary.className = 'compact-summary-text';
+      summary.textContent = formatCompactSummary(task);
+      card.appendChild(summary);
+
+      const actions = document.createElement('div');
+      actions.className = 'review-actions';
+
+      const okBtn = document.createElement('button');
+      okBtn.type = 'button'; okBtn.className = 'review-ok-btn';
+      okBtn.textContent = '✓ Looks right';
+      okBtn.addEventListener('click', () => { window.Tasks.resolveReview(task.id, null); renderList(); });
+      actions.appendChild(okBtn);
+
+      const fixBtn = document.createElement('button');
+      fixBtn.type = 'button'; fixBtn.className = 'review-fix-btn';
+      fixBtn.textContent = '✎ Fix';
+      fixBtn.addEventListener('click', () => { fixingIds.add(task.id); renderList(); });
+      actions.appendChild(fixBtn);
+
+      card.appendChild(actions);
+    } else {
+      card.appendChild(buildFieldsGrid(task));
+
+      const actions = document.createElement('div');
+      actions.className = 'review-actions';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button'; saveBtn.className = 'review-ok-btn';
+      saveBtn.textContent = 'Save Correction';
+      saveBtn.addEventListener('click', () => {
+        const fresh = window.Tasks.getTasks().find(t => t.id === task.id);
+        window.Tasks.resolveReview(task.id, fresh);
+        fixingIds.delete(task.id);
+        renderList();
+      });
+      actions.appendChild(saveBtn);
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'review-fix-btn';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.addEventListener('click', () => { fixingIds.delete(task.id); renderList(); });
+      actions.appendChild(cancelBtn);
+
+      card.appendChild(actions);
+    }
+    return card;
+  }
+
+  function buildRow(task) {
+    const row = document.createElement('div');
+    row.className = 'task-row';
+    row.dataset.id = task.id;
+
+    const top = document.createElement('div');
+    top.className = 'task-row-top';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'task-done-cb';
+    cb.addEventListener('change', () => {
+      if (cb.checked) openFeedbackModal(task, () => { cb.checked = false; });
+    });
+    top.appendChild(cb);
+
+    const title = document.createElement('span');
+    title.className = 'task-title';
+    title.textContent = task.title;
+    title.setAttribute('contenteditable', 'false');
+    title.addEventListener('click', () => {
+      if (title.getAttribute('contenteditable') === 'true') return;
+      title.setAttribute('contenteditable', 'true');
+      title.focus();
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+    });
+    function commitTitle() {
+      title.removeAttribute('contenteditable');
+      const next = title.textContent.trim();
+      if (next && next !== task.title) window.Tasks.updateTask(task.id, { title: next });
+      else title.textContent = task.title;
+    }
+    title.addEventListener('blur', commitTitle);
+    title.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); title.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); title.textContent = task.title; title.blur(); }
+    });
+    top.appendChild(title);
+
+    if (classifyingIds.has(task.id)) {
+      const tag = document.createElement('span');
+      tag.className = 'classifying-tag';
+      tag.textContent = 'Classifying…';
+      top.appendChild(tag);
+    }
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'task-delete';
+    del.textContent = '×';
+    del.setAttribute('aria-label', 'Delete task');
+    del.addEventListener('click', () => {
+      window.Tasks.removeTask(task.id);
+      renderList();
+    });
+    top.appendChild(del);
+
+    row.appendChild(top);
+
+    if (task.needsReview) {
+      row.appendChild(buildReviewCard(task));
+    } else if (task.classified && !editingIds.has(task.id)) {
+      row.appendChild(buildCompactSummary(task));
+    } else {
+      row.appendChild(buildEditableSection(task));
+    }
+
     return row;
   }
 
@@ -415,20 +711,23 @@ body::after {
   // rejects), always ends by clearing classifyingIds and re-rendering, so a
   // slow or failed classification just leaves those tasks on their defaults
   // instead of blocking anything.
-  async function classifyBatch(items, lifeContext, existingTasks) {
+  async function classifyBatch(items, lifeContext, existingTasks, corrections, completions) {
     items.forEach(item => classifyingIds.add(item.id));
     renderList();
     try {
       const r = await fetch('/api/classify-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ titles: items.map(i => i.title), lifeContext, existingTasks }),
+        body: JSON.stringify({ titles: items.map(i => i.title), lifeContext, existingTasks, corrections, completions }),
       });
       const data = await r.json();
       if (data && data.ok && Array.isArray(data.classifications)) {
         items.forEach((item, i) => {
           const c = data.classifications[i];
-          if (c) window.Tasks.updateTask(item.id, c);
+          // applyClassification (not updateTask) branches on c.confidence:
+          // >=90 auto-accepts silently, <90 applies the fields immediately
+          // but flags needsReview so the row shows the approve/fix card.
+          if (c) window.Tasks.applyClassification(item.id, c);
         });
       }
     } catch (e) {
@@ -447,6 +746,11 @@ body::after {
     const lifeContext = loadLifeContext();
     const excludeIds = new Set(items.map(i => i.id));
     const existingTasks = getExistingTasksForCalibration(excludeIds);
+    // The Preference Model: the user's actual approve/correct history and
+    // completion feedback, sent as few-shot examples so predictions keep
+    // improving instead of guessing cold every time.
+    const corrections = window.Tasks.getRecentCorrections(25);
+    const completions = window.Tasks.getRecentCompletions(20);
 
     const chunks = [];
     for (let i = 0; i < items.length; i += CLASSIFY_BATCH_SIZE) chunks.push(items.slice(i, i + CLASSIFY_BATCH_SIZE));
@@ -455,7 +759,7 @@ body::after {
     async function worker() {
       while (idx < chunks.length) {
         const chunk = chunks[idx++];
-        await classifyBatch(chunk, lifeContext, existingTasks);
+        await classifyBatch(chunk, lifeContext, existingTasks, corrections, completions);
       }
     }
     const workers = Array.from({ length: Math.min(CLASSIFY_BATCH_CONCURRENCY, chunks.length) }, worker);
@@ -474,6 +778,7 @@ body::after {
 
   whenTasksReady(function () {
     wireBulkAdd();
+    wireFeedbackModal();
     renderList();
     window.addEventListener('tasks-changed', renderList);
     window.addEventListener('storage', renderList);

@@ -55,6 +55,9 @@
     if (m.energyLevel == null) m.energyLevel = 'medium';
     if (m.estimatedMinutes == null) m.estimatedMinutes = 30;
     if (m.classified === undefined) m.classified = false;
+    if (m.needsReview === undefined) m.needsReview = false;
+    if (m.predictionConfidence === undefined) m.predictionConfidence = null;
+    if (m.pendingPrediction === undefined) m.pendingPrediction = null;
     return m;
   }
 
@@ -107,28 +110,133 @@
   // ---------- Completion history ----------
   // Append-only, capped log used for the (currently neutral-until-enough-
   // data) historical-productivity signal in the Decision Engine — see
-  // getStreakContext() below.
+  // getStreakContext() below — and, once feedback is attached, as
+  // duration-calibration examples fed back into classify-task.js (see
+  // getRecentCompletions).
   const COMPLETIONS_KEY = 'task_completions_v1';
   const COMPLETIONS_CAP = 200;
 
-  function logCompletion(task, now) {
+  // feedback: optional { actualMinutes, feeling, wasSubtask } from the
+  // completion-feedback modal. Completing without feedback (the "Skip"
+  // path in the UI) just omits it — logged fields stay null.
+  function logCompletion(task, now, feedback) {
     const log = loadJSON(COMPLETIONS_KEY, []);
     const list = Array.isArray(log) ? log : [];
     list.push({
+      title: task.title,
       lifeDomain: task.lifeDomain,
       hour: new Date(now).getHours(),
       dayOfWeek: new Date(now).getDay(),
       completedAt: now,
+      estimatedMinutes: task.estimatedMinutes != null ? task.estimatedMinutes : null,
+      actualMinutes: feedback && feedback.actualMinutes != null ? feedback.actualMinutes : null,
+      feeling: feedback && feedback.feeling ? feedback.feeling : null,
+      wasSubtask: !!(feedback && feedback.wasSubtask),
     });
     while (list.length > COMPLETIONS_CAP) list.shift();
     try { localStorage.setItem(COMPLETIONS_KEY, JSON.stringify(list)); } catch (e) {}
   }
 
-  function completeTask(id) {
+  function completeTask(id, feedback) {
     const now = Date.now();
     const task = updateTask(id, { done: true, completedAt: now });
-    if (task) logCompletion(task, now);
+    if (task) logCompletion(task, now, feedback);
     return task;
+  }
+
+  function getRecentCompletions(limit) {
+    const log = loadJSON(COMPLETIONS_KEY, []);
+    const list = Array.isArray(log) ? log : [];
+    return list.filter(e => e.actualMinutes != null).slice(-(limit || 20));
+  }
+
+  // ---------- Preference Model data ----------
+  // Not a trained model — there's no training pipeline in this
+  // architecture. This is the growing log of predictions vs. what the
+  // user actually confirmed or changed, sampled into every classify-task.js
+  // prompt as few-shot examples ("Preference Model" section) so scoring
+  // is grounded in demonstrated preference, not just the Life Context text
+  // and not a cold guess. See applyClassification/resolveReview below for
+  // where entries get written.
+  const CORRECTIONS_KEY = 'task_corrections_v1';
+  const CORRECTIONS_CAP = 300;
+
+  function logCorrection(entry) {
+    const log = loadJSON(CORRECTIONS_KEY, []);
+    const list = Array.isArray(log) ? log : [];
+    list.push(Object.assign({ id: genId(), timestamp: Date.now() }, entry));
+    while (list.length > CORRECTIONS_CAP) list.shift();
+    try { localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  // Prioritizes 'corrected' entries (highest signal — the model was wrong
+  // and this is exactly right) over 'approved'/'auto_accepted' ones, but
+  // includes some of the latter too so the model also sees confirmed-good
+  // predictions, not only failures.
+  function getRecentCorrections(limit) {
+    const log = loadJSON(CORRECTIONS_KEY, []);
+    const list = Array.isArray(log) ? log : [];
+    const lim = limit || 25;
+    // Take the most recent `lim` corrected entries first (highest signal),
+    // then fill any remaining room with the most recent other entries —
+    // NOT the other way around, since slicing a corrected-then-other
+    // concatenation from the end would take the tail (all "other") and
+    // silently drop every corrected entry once "other" alone exceeds lim.
+    const corrected = list.filter(e => e.outcome === 'corrected').slice(-lim);
+    const remaining = lim - corrected.length;
+    const other = remaining > 0 ? list.filter(e => e.outcome !== 'corrected').slice(-remaining) : [];
+    return corrected.concat(other);
+  }
+
+  const CLASSIFICATION_FIELDS = ['lifeDomain', 'schoolClass', 'longTermROI', 'urgency', 'difficulty', 'estimatedMinutes', 'energyLevel'];
+  function pickClassificationFields(obj) {
+    const out = {};
+    CLASSIFICATION_FIELDS.forEach(k => { out[k] = obj[k] != null ? obj[k] : null; });
+    return out;
+  }
+
+  // Applies a classify-task.js result to a task. Confidence >= 90 applies
+  // silently and logs it as training data immediately (auto-accepted
+  // predictions are still signal — the goal is fewer reviews over time,
+  // which needs a record of what worked, not just what got corrected).
+  // Confidence < 90 applies the fields too (so the task is immediately
+  // usable/rankable — a pending review never blocks the Decision Engine)
+  // but flags needsReview and stashes the prediction for the approval card.
+  function applyClassification(id, classification) {
+    const fields = pickClassificationFields(classification);
+    const confidence = classification.confidence != null ? classification.confidence : 60;
+    const needsReview = confidence < 90;
+    const task = updateTask(id, Object.assign({}, fields, {
+      classified: true,
+      predictionConfidence: confidence,
+      needsReview,
+      pendingPrediction: needsReview ? fields : null,
+    }));
+    if (task && !needsReview) {
+      logCorrection({ title: task.title, prediction: fields, correction: null, confidence, outcome: 'auto_accepted' });
+    }
+    return task;
+  }
+
+  // Called from the review card. correctedFields === null means "Looks
+  // right" (approve the prediction as-is); an object means the user
+  // changed something via "Fix".
+  function resolveReview(id, correctedFields) {
+    const list = getTasks();
+    const task = list.find(t => t.id === id);
+    if (!task) return null;
+    const prediction = task.pendingPrediction || pickClassificationFields(task);
+    const isCorrection = correctedFields != null;
+    const finalFields = isCorrection ? pickClassificationFields(correctedFields) : prediction;
+    const updated = updateTask(id, Object.assign({}, finalFields, { needsReview: false, pendingPrediction: null }));
+    logCorrection({
+      title: task.title,
+      prediction,
+      correction: isCorrection ? finalFields : null,
+      confidence: task.predictionConfidence,
+      outcome: isCorrection ? 'corrected' : 'approved',
+    });
+    return updated;
   }
 
   // Snooze a task out of ranking contention for a while — this is what
@@ -578,6 +686,10 @@
     skipTask,
     removeTask,
     rankTasks,
+    applyClassification,
+    resolveReview,
+    getRecentCorrections,
+    getRecentCompletions,
     getGcalTokens,
     setGcalTokens,
     clearGcalTokens,
