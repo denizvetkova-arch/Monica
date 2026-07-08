@@ -12,6 +12,7 @@
 <script src="sync.js" defer></script>
 <script src="topbar.js" defer></script>
 <script src="tasks.js" defer></script>
+<script src="preference-profile.js" defer></script>
 
 <style>
 :root {
@@ -257,6 +258,41 @@ body::after {
 .reclassify-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #E07658, #FAFAFA); transition: width 0.25s ease; }
 .reclassify-progress-label { font-size: 11.5px; color: var(--text-tertiary); margin-top: 7px; text-align: center; }
 .reclassify-status { font-size: 12px; color: var(--success); margin-top: 10px; min-height: 16px; text-align: center; }
+
+/* ===== Teach Monica / Preference Profile ===== */
+.teach-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.teach-count { font-size: 13px; color: var(--text-secondary); }
+.teach-count strong { color: var(--text-primary); font-size: 16px; }
+.teach-link {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 10px 16px; border-radius: 11px; text-decoration: none;
+  background: linear-gradient(180deg, #FFFFFF 0%, #E8E5DD 100%); color: #0A0A0B;
+  font-family: inherit; font-size: 13px; font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 22px rgba(0,0,0,0.25);
+}
+.teach-link:hover { filter: brightness(1.05); }
+.pref-block { font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; white-space: pre-line; }
+.pref-block + .pref-block { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+.pref-domain-label { color: var(--text-primary); font-weight: 700; }
+.pref-totals { font-size: 11px; color: var(--text-tertiary); margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+
+/* ===== Details textarea (Edit/Fix mode) ===== */
+.details-field { padding-left: 30px; margin-top: 8px; }
+.details-textarea {
+  width: 100%; min-height: 60px; resize: vertical;
+  padding: 8px 10px; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+  background: rgba(0,0,0,0.28); color: var(--text-secondary);
+  font-family: inherit; font-size: 12px; line-height: 1.5; outline: none;
+}
+.details-textarea::placeholder { color: var(--text-tertiary); }
+.details-label { font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 4px; display: block; }
+.reclassify-row-btn {
+  border: 1px solid rgba(255,255,255,0.10); background: transparent;
+  color: var(--text-tertiary); font-family: inherit; font-size: 11px; font-weight: 700;
+  border-radius: 8px; padding: 5px 10px; cursor: pointer; flex-shrink: 0;
+  transition: background 0.15s, color 0.15s; margin-right: 6px;
+}
+.reclassify-row-btn:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
 </style>
 </head>
 <body>
@@ -287,6 +323,19 @@ body::after {
       <div class="reclassify-progress-label" id="reclassifyLabel"></div>
     </div>
     <div class="reclassify-status" id="reclassifyStatus"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Teach Monica</div>
+    <div class="teach-row">
+      <div class="teach-count" id="teachCount">Checking…</div>
+      <a class="teach-link" id="teachLink" href="train.html">Start Training Session →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Preference Profile</div>
+    <div id="prefProfileBody"></div>
   </div>
 
   <div class="card">
@@ -335,6 +384,7 @@ body::after {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const CATEGORY_EMOJI = { career: '💼', school: '📚', debate: '🎤', glp1_research: '🧪', finance: '💰', personal: '🌱', extracurricular: '🎯', health: '💊' };
+  const ENERGY_LABELS = { very_low: 'Very Low', low: 'Low', medium: 'Medium', high: 'High', deep_focus: 'Deep Focus' };
 
   // In-memory only (not persisted) — tracks which tasks currently have a
   // classify-task.js request in flight, purely so the row can show a
@@ -386,7 +436,7 @@ body::after {
     const parts = [(CATEGORY_EMOJI[task.lifeDomain] || '') + ' ' + task.lifeDomain];
     if (task.schoolClass) parts.push(task.schoolClass);
     parts.push('ROI ' + task.longTermROI);
-    parts.push(task.energyLevel + ' energy');
+    parts.push((ENERGY_LABELS[task.energyLevel] || task.energyLevel) + ' energy');
     parts.push(task.estimatedMinutes + 'm');
     if (task.deadline) parts.push(formatDeadline(task.deadline));
     return parts.join(' · ');
@@ -494,33 +544,44 @@ body::after {
     classInput.value = task.schoolClass || '';
     classInput.style.display = task.lifeDomain === 'school' ? '' : 'none';
     classInput.addEventListener('change', () => {
-      window.Tasks.updateTask(task.id, { schoolClass: classInput.value.trim() || null });
+      const next = classInput.value.trim() || null;
+      window.Tasks.logManualEdit(task.title, 'schoolClass', task.schoolClass, next);
+      window.Tasks.updateTask(task.id, { schoolClass: next, userReviewed: true });
     });
     fields.appendChild(classInput);
 
+    // Every manual edit here teaches Monica something, not just corrections
+    // made through the review card's "Fix" flow — logManualEdit feeds the
+    // Preference Profile from ANY deliberate field change. Each also marks
+    // userReviewed:true — a human explicitly set this classification, so
+    // "Reclassify Entire Database" must never silently overwrite it later.
     catSelect.addEventListener('change', () => {
-      window.Tasks.updateTask(task.id, { lifeDomain: catSelect.value });
+      window.Tasks.logManualEdit(task.title, 'lifeDomain', task.lifeDomain, catSelect.value);
+      window.Tasks.updateTask(task.id, { lifeDomain: catSelect.value, userReviewed: true });
       classInput.style.display = catSelect.value === 'school' ? '' : 'none';
     });
 
     const energySelect = document.createElement('select');
     window.Tasks.ENERGY_LEVELS.forEach(lvl => {
       const opt = document.createElement('option');
-      opt.value = lvl; opt.textContent = lvl + ' energy';
+      opt.value = lvl; opt.textContent = (ENERGY_LABELS[lvl] || lvl) + ' energy';
       if (lvl === task.energyLevel) opt.selected = true;
       energySelect.appendChild(opt);
     });
-    energySelect.addEventListener('change', () => window.Tasks.updateTask(task.id, { energyLevel: energySelect.value }));
+    energySelect.addEventListener('change', () => {
+      window.Tasks.logManualEdit(task.title, 'energyLevel', task.energyLevel, energySelect.value);
+      window.Tasks.updateTask(task.id, { energyLevel: energySelect.value, userReviewed: true });
+    });
     fields.appendChild(energySelect);
 
     fields.appendChild(miniNumberField('ROI', task.longTermROI, 1, 10, 'f-roi', 'Long-term ROI (1-10)',
-      (v) => window.Tasks.updateTask(task.id, { longTermROI: v })));
+      (v) => { window.Tasks.logManualEdit(task.title, 'longTermROI', task.longTermROI, v); window.Tasks.updateTask(task.id, { longTermROI: v, userReviewed: true }); }));
     fields.appendChild(miniNumberField('Urg', task.urgency, 1, 10, 'f-urgency', 'Urgency (1-10)',
-      (v) => window.Tasks.updateTask(task.id, { urgency: v })));
+      (v) => { window.Tasks.logManualEdit(task.title, 'urgency', task.urgency, v); window.Tasks.updateTask(task.id, { urgency: v, userReviewed: true }); }));
     fields.appendChild(miniNumberField('Diff', task.difficulty, 1, 10, 'f-difficulty', 'Difficulty (1-10)',
-      (v) => window.Tasks.updateTask(task.id, { difficulty: v })));
+      (v) => { window.Tasks.logManualEdit(task.title, 'difficulty', task.difficulty, v); window.Tasks.updateTask(task.id, { difficulty: v, userReviewed: true }); }));
     fields.appendChild(miniNumberField('Min', task.estimatedMinutes, 1, 480, 'f-minutes', 'Estimated minutes',
-      (v) => window.Tasks.updateTask(task.id, { estimatedMinutes: v })));
+      (v) => { window.Tasks.logManualEdit(task.title, 'estimatedMinutes', task.estimatedMinutes, v); window.Tasks.updateTask(task.id, { estimatedMinutes: v, userReviewed: true }); }));
 
     const dlInput = document.createElement('input');
     dlInput.type = 'datetime-local';
@@ -534,6 +595,32 @@ body::after {
     return fields;
   }
 
+  // A per-task free-text field, read by classify-task.js alongside the
+  // title so Monica can adjust ROI/urgency/etc. from context a bare title
+  // can't convey (e.g. "why this actually matters", "what makes this
+  // harder than it looks"). Only shown in Edit/Fix mode, like the rest of
+  // buildFieldsGrid.
+  function buildDetailsField(task) {
+    const wrap = document.createElement('div');
+    wrap.className = 'details-field';
+    const label = document.createElement('label');
+    label.className = 'details-label';
+    label.textContent = 'Details (read by the AI classifier)';
+    wrap.appendChild(label);
+    const textarea = document.createElement('textarea');
+    textarea.className = 'details-textarea';
+    textarea.placeholder = 'Any context that should change how this is scored…';
+    textarea.value = task.details || '';
+    textarea.addEventListener('blur', () => {
+      const next = textarea.value.trim();
+      if (next === (task.details || '')) return;
+      window.Tasks.logManualEdit(task.title, 'details', task.details || '', next);
+      window.Tasks.updateTask(task.id, { details: next });
+    });
+    wrap.appendChild(textarea);
+    return wrap;
+  }
+
   // Default state for an already-classified, non-review task: a compact
   // read-only line + an Edit toggle — replaces the always-visible grid.
   function buildCompactSummary(task) {
@@ -543,12 +630,29 @@ body::after {
     text.className = 'compact-summary-text';
     text.textContent = formatCompactSummary(task);
     wrap.appendChild(text);
+
+    const btnGroup = document.createElement('span');
+
+    // Re-runs just this one task through the classifier immediately —
+    // useful right after editing its Details field, without waiting for a
+    // full "Reclassify Entire Database" pass.
+    const reclassifyBtn = document.createElement('button');
+    reclassifyBtn.type = 'button';
+    reclassifyBtn.className = 'reclassify-row-btn';
+    reclassifyBtn.textContent = '↻ Reclassify';
+    reclassifyBtn.addEventListener('click', () => {
+      classifyQueue([{ id: task.id, title: task.title, details: task.details }]);
+    });
+    btnGroup.appendChild(reclassifyBtn);
+
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.className = 'edit-toggle-btn';
     editBtn.textContent = 'Edit';
     editBtn.addEventListener('click', () => { editingIds.add(task.id); renderList(); });
-    wrap.appendChild(editBtn);
+    btnGroup.appendChild(editBtn);
+
+    wrap.appendChild(btnGroup);
     return wrap;
   }
 
@@ -557,6 +661,7 @@ body::after {
   function buildEditableSection(task) {
     const container = document.createElement('div');
     container.appendChild(buildFieldsGrid(task));
+    container.appendChild(buildDetailsField(task));
     // Only classified tasks have a compact view to collapse back to —
     // unclassified tasks (no API key configured, or still awaiting a
     // response) show this grid as their only state, same as before.
@@ -607,6 +712,7 @@ body::after {
       card.appendChild(actions);
     } else {
       card.appendChild(buildFieldsGrid(task));
+      card.appendChild(buildDetailsField(task));
 
       const actions = document.createElement('div');
       actions.className = 'review-actions';
@@ -721,6 +827,50 @@ body::after {
     $('emptyHint').style.display = all.length === 0 ? 'block' : 'none';
     $('listCount').textContent = all.length === 0 ? '' : (all.length === 1 ? '1 open task' : all.length + ' open tasks');
     updateReclassifyUI();
+    updateTeachMonicaUI();
+    renderPreferenceProfileCard();
+  }
+
+  // ===== Teach Monica =====
+  function updateTeachMonicaUI() {
+    const unreviewed = window.Tasks.getTasks().filter(t => !t.userReviewed).length;
+    const countEl = $('teachCount');
+    if (unreviewed === 0) {
+      countEl.innerHTML = 'Every task reflects your judgment.';
+    } else {
+      countEl.innerHTML = '<strong>' + unreviewed + '</strong> task' + (unreviewed === 1 ? '' : 's') + ' waiting to be taught';
+    }
+  }
+
+  // ===== Preference Profile card =====
+  // Renders preference-profile.js's summaryText() as a simple list of
+  // blocks (one per domain/keyword group, matching how summaryText joins
+  // them with blank lines), plus overall totals. Re-renders on every
+  // renderList() call — cheap, since the profile is computed on demand
+  // from capped logs.
+  function renderPreferenceProfileCard() {
+    const body = $('prefProfileBody');
+    if (!window.PreferenceProfile) { body.textContent = 'Loading…'; return; }
+    const profile = window.PreferenceProfile.computeProfile();
+    const text = window.PreferenceProfile.summaryText(profile);
+    body.innerHTML = '';
+    text.split('\n\n').forEach(block => {
+      const div = document.createElement('div');
+      div.className = 'pref-block';
+      const lines = block.split('\n');
+      // Plain informational messages ("not enough data yet") are a single
+      // line with no separate label — only "Domain:\nline1\nline2" blocks
+      // get the bold-label treatment.
+      div.innerHTML = lines.length > 1
+        ? '<span class="pref-domain-label">' + lines[0].replace(/</g, '&lt;') + '</span>\n' + lines.slice(1).join('\n').replace(/</g, '&lt;')
+        : lines[0].replace(/</g, '&lt;');
+      body.appendChild(div);
+    });
+    const totals = document.createElement('div');
+    totals.className = 'pref-totals';
+    totals.textContent = profile.totals.corrections + ' correction' + (profile.totals.corrections === 1 ? '' : 's') +
+      ' logged · ' + profile.totals.completionsWithFeedback + ' completion' + (profile.totals.completionsWithFeedback === 1 ? '' : 's') + ' with feedback';
+    body.appendChild(totals);
   }
 
   // Snapshot of other open tasks (title/domain/ROI only) sent alongside
@@ -738,15 +888,26 @@ body::after {
   // Fire-and-forget classification for one batch — always resolves (never
   // rejects), always ends by clearing classifyingIds and re-rendering, so a
   // slow or failed classification just leaves those tasks on their defaults
-  // instead of blocking anything.
-  async function classifyBatch(items, lifeContext, existingTasks, corrections, completions, onBatchDone) {
+  // instead of blocking anything. `ctx` bundles everything shared across a
+  // whole classifyQueue() run (lifeContext/existingTasks/corrections/
+  // completions/preferenceSummary) — kept as one object since it grew past
+  // the point where separate positional args stayed readable.
+  async function classifyBatch(items, ctx, onBatchDone) {
     items.forEach(item => classifyingIds.add(item.id));
     renderList();
     try {
       const r = await fetch('/api/classify-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ titles: items.map(i => i.title), lifeContext, existingTasks, corrections, completions }),
+        body: JSON.stringify({
+          titles: items.map(i => i.title),
+          details: items.map(i => i.details || ''),
+          lifeContext: ctx.lifeContext,
+          existingTasks: ctx.existingTasks,
+          corrections: ctx.corrections,
+          completions: ctx.completions,
+          preferenceSummary: ctx.preferenceSummary,
+        }),
       });
       const data = await r.json();
       if (data && data.ok && Array.isArray(data.classifications)) {
@@ -775,14 +936,20 @@ body::after {
   // regular bulk-add doesn't pass one.
   async function classifyQueue(items, onBatchDone) {
     if (items.length === 0) return;
-    const lifeContext = loadLifeContext();
     const excludeIds = new Set(items.map(i => i.id));
-    const existingTasks = getExistingTasksForCalibration(excludeIds);
-    // The Preference Model: the user's actual approve/correct history and
-    // completion feedback, sent as few-shot examples so predictions keep
-    // improving instead of guessing cold every time.
-    const corrections = window.Tasks.getRecentCorrections(25);
-    const completions = window.Tasks.getRecentCompletions(20);
+    const ctx = {
+      lifeContext: loadLifeContext(),
+      existingTasks: getExistingTasksForCalibration(excludeIds),
+      // Raw recent few-shot examples — concrete texture under the
+      // aggregated Preference Profile below.
+      corrections: window.Tasks.getRecentCorrections(25),
+      completions: window.Tasks.getRecentCompletions(20),
+      // The Preference Profile: aggregated, named patterns learned from
+      // this person's ENTIRE correction/completion history (per-domain
+      // biases, keyword->domain associations), read by the model BEFORE
+      // anything else — see preference-profile.js.
+      preferenceSummary: window.PreferenceProfile.summaryText(window.PreferenceProfile.computeProfile()),
+    };
 
     const chunks = [];
     for (let i = 0; i < items.length; i += CLASSIFY_BATCH_SIZE) chunks.push(items.slice(i, i + CLASSIFY_BATCH_SIZE));
@@ -791,7 +958,7 @@ body::after {
     async function worker() {
       while (idx < chunks.length) {
         const chunk = chunks[idx++];
-        await classifyBatch(chunk, lifeContext, existingTasks, corrections, completions, onBatchDone);
+        await classifyBatch(chunk, ctx, onBatchDone);
       }
     }
     const workers = Array.from({ length: Math.min(CLASSIFY_BATCH_CONCURRENCY, chunks.length) }, worker);
@@ -804,7 +971,7 @@ body::after {
       const added = lines.map(title => window.Tasks.addTask({ title }));
       $('bulkInput').value = '';
       renderList();
-      classifyQueue(added.map(t => ({ id: t.id, title: t.title })));
+      classifyQueue(added.map(t => ({ id: t.id, title: t.title, details: t.details })));
     });
   }
 
@@ -829,7 +996,7 @@ body::after {
       btn.disabled = true;
     } else {
       hint.textContent = stale.length + ' task' + (stale.length === 1 ? '' : 's') +
-        ' still have old or generic metadata (e.g. personal / medium energy / ROI 6 / urgency 5 / difficulty 5) — reclassify to fix.';
+        (stale.length === 1 ? ' still has' : ' still have') + ' old or generic metadata (e.g. personal / medium energy / ROI 6 / urgency 5 / difficulty 5) — reclassify to fix.';
       btn.disabled = false;
     }
   }
@@ -852,7 +1019,7 @@ body::after {
       $('reclassifyStatus').textContent = '';
       showReclassifyProgress(0, stale.length);
       let done = 0;
-      await classifyQueue(stale.map(t => ({ id: t.id, title: t.title })), (n) => {
+      await classifyQueue(stale.map(t => ({ id: t.id, title: t.title, details: t.details })), (n) => {
         done = Math.min(done + n, stale.length);
         showReclassifyProgress(done, stale.length);
       });

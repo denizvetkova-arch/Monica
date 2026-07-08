@@ -1,9 +1,10 @@
 // ============================================================
 // POST /api/classify-task
-// Body: { titles: ["Email professor", "Costco"], lifeContext: "...",
-//         existingTasks: [{title, lifeDomain, longTermROI}, ...],
+// Body: { titles: ["Email professor", "Costco"], details: ["", "..."],
+//         lifeContext: "...", existingTasks: [{title, lifeDomain, longTermROI}, ...],
 //         corrections: [{title, prediction, correction, outcome}, ...],
-//         completions: [{title, estimatedMinutes, actualMinutes, feeling}, ...] }
+//         completions: [{title, estimatedMinutes, actualMinutes, feeling}, ...],
+//         preferenceSummary: "..." }
 // Reply: { ok: true, classifications: [{...}, ...] } | { ok: false, error }
 // (classifications is in the same order as titles)
 //
@@ -15,19 +16,24 @@
 // work from any device without re-pasting a key into each one's
 // localStorage.
 //
-// v3 — AI Training Mode. Each classification now also carries a
-// `confidence` (1-100). The client (manage.html) auto-accepts >= 90
-// silently and only surfaces a review card below that. Below 90 isn't
-// a failure — it's the model correctly saying "I'm not sure," which is
-// exactly the case the review card exists for.
+// v3 — AI Training Mode. Each classification also carries a `confidence`
+// (1-100). The client (manage.html) auto-accepts >= 90 silently and only
+// surfaces a review card below that. Below 90 isn't a failure — it's the
+// model correctly saying "I'm not sure," which is exactly the case the
+// review card exists for.
 //
-// `corrections` and `completions` are the "Preference Model" — not a
-// trained model (no training pipeline exists in this architecture),
-// but a growing sample of the user's actual approve/correct history and
-// completion feedback, fed into the prompt as few-shot examples so
-// predictions are grounded in demonstrated preference instead of a cold
-// guess every time. tasks.js's getRecentCorrections()/getRecentCompletions()
-// build these arrays; this endpoint just formats them into the prompt.
+// v4 — Preference Model v2. `preferenceSummary` is a preformatted
+// narrative string computed CLIENT-SIDE by preference-profile.js (this
+// endpoint has no access to localStorage) — aggregated, named patterns
+// like "Research: ROI +2 over average" or "AI, startup, coding: learned
+// as Career," derived from the full history of corrections/completions,
+// not just a recent sample. It's read FIRST, before the raw corrections/
+// completions few-shot lists, since it's the highest-level prior. Those
+// raw lists stay too — concrete recent examples still add texture under
+// the aggregated summary. `details` is optional free-text per task
+// (from a task's own Details field in manage.html/train.html) giving the
+// model context a title alone can't — e.g. why something is harder or
+// more urgent than its title implies.
 //
 // Never blocks task creation: manage.html adds tasks immediately with
 // defaults and patches in the classification when (if) this resolves.
@@ -40,12 +46,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 const CATEGORIES = ['career', 'school', 'debate', 'glp1_research', 'finance', 'personal', 'extracurricular', 'health'];
-const ENERGY_LEVELS = ['low', 'medium', 'high'];
+// 5-level — was 3 (low/medium/high). Matches tasks.js's ENERGY_LEVELS.
+const ENERGY_LEVELS = ['very_low', 'low', 'medium', 'high', 'deep_focus'];
 const RECURRENCE_VALUES = ['none', 'daily', 'weekly', 'monthly'];
 const MAX_TITLES_PER_CALL = 40; // caller (manage.html) chunks larger batches into multiple calls
 const MAX_EXISTING_TASKS = 40;
 const MAX_CORRECTIONS = 25;
 const MAX_COMPLETIONS = 20;
+const MAX_PREFERENCE_SUMMARY_CHARS = 4000;
 const DEFAULT_CONFIDENCE = 60; // missing confidence reads as "uncertain", not "trust blindly"
 
 const BATCH_SCHEMA = {
@@ -59,14 +67,14 @@ const BATCH_SCHEMA = {
           title: { type: 'string', description: 'Echo the exact task title this classification is for.' },
           lifeDomain: { type: 'string', enum: CATEGORIES },
           schoolClass: { type: ['string', 'null'], description: 'Only set when lifeDomain is "school" — the specific class/course. Null otherwise.' },
-          longTermROI: { type: 'integer', description: '1-10: how much this matters for long-term outcomes, grounded in the life context provided. Spread scores across the range — do not default to 5-6.' },
+          longTermROI: { type: 'integer', description: '1-10: how much this matters for long-term outcomes, grounded in the life context and Preference Profile provided. Spread scores across the range — do not default to 5-6.' },
           urgency: { type: 'integer', description: '1-10: how time-sensitive this inherently is, independent of any explicit deadline.' },
           difficulty: { type: 'integer', description: '1-10: cognitive/effort difficulty.' },
           estimatedMinutes: { type: 'integer', description: 'Realistic estimated time to complete, in minutes.' },
-          energyLevel: { type: 'string', enum: ENERGY_LEVELS, description: 'Energy required to do this well.' },
+          energyLevel: { type: 'string', enum: ENERGY_LEVELS, description: 'Energy required to do this well — deep_focus for anything needing a long uninterrupted block, not just "hard" tasks.' },
           confidence: {
             type: 'integer',
-            description: '1-100: how confident you are in THIS classification. Score lower (below 90) when the title is ambiguous, generic, or does not clearly match the life context / preference examples / existing tasks provided. Score higher when it clearly matches a stated priority or a previously-confirmed pattern. Do not default to a high number out of politeness — low confidence is the correct, useful answer when a task is genuinely unclear.',
+            description: '1-100: how confident you are in THIS classification. Score lower (below 90) when the title is ambiguous, generic, or does not clearly match the life context / Preference Profile / existing tasks provided. Score higher when it clearly matches a stated priority or a previously-learned pattern. Do not default to a high number out of politeness — low confidence is the correct, useful answer when a task is genuinely unclear.',
           },
           recurrence: {
             type: 'string', enum: RECURRENCE_VALUES,
@@ -116,22 +124,41 @@ function formatFieldsShort(f) {
   return f.lifeDomain + ', ROI ' + f.longTermROI + ', urgency ' + f.urgency + ', difficulty ' + f.difficulty + ', ~' + f.estimatedMinutes + 'm, ' + f.energyLevel + ' energy';
 }
 
-export function buildPrompt(titles, lifeContext, existingTasks, corrections, completions) {
+// options: { titles, details, lifeContext, existingTasks, corrections,
+// completions, preferenceSummary }. An options object rather than
+// positional args — this grew from 3 to 7 parameters as the Preference
+// Model deepened, past the point where positional args stay readable.
+export function buildPrompt(options) {
+  const { titles, details, lifeContext, existingTasks, corrections, completions, preferenceSummary } = options;
+
   const contextBlock = lifeContext && lifeContext.trim()
     ? 'Here is what this person has told you about their life, goals, and priorities — use it to judge what actually matters to them:\n"""\n' + lifeContext.trim() + '\n"""'
     : "This person hasn't written a life context yet, so use your best general judgment — but still differentiate between tasks rather than scoring them all the same.";
+
+  // The Preference Profile — aggregated, named patterns learned from this
+  // person's ENTIRE correction/completion history (not just a recent
+  // sample). Placed right after Life Context since it's the highest-level
+  // prior: apply it before anything else, including for new tasks whose
+  // title matches a learned keyword even if it looks generically like
+  // another domain (e.g. "AI coding" should read as Career if that's what
+  // the profile says, not Personal just because it sounds like a hobby).
+  const preferenceSummaryBlock = preferenceSummary && preferenceSummary.trim()
+    ? '\n\nMonica\'s Preference Profile — patterns learned from this person over time. Apply these FIRST, ' +
+      'before general judgment, even overriding what a generic guess would suggest:\n"""\n' + preferenceSummary.trim() + '\n"""'
+    : '';
 
   const existingBlock = existingTasks && existingTasks.length
     ? '\n\nTheir other current open tasks, for calibration (use these so you don\'t score every new task the same — judge each new task relative to this real workload):\n' +
       existingTasks.map(t => '- "' + t.title + '"' + (t.lifeDomain ? ' [' + t.lifeDomain + (t.longTermROI != null ? ', ROI ' + t.longTermROI : '') + ']' : '')).join('\n')
     : '';
 
-  // The "Preference Model" — not a trained model, a growing few-shot log of
-  // what this specific user actually approved or changed. Framed explicitly
-  // as pattern-learning, not memorization of these exact titles.
+  // Raw few-shot corrections/completions — concrete recent examples that
+  // add texture under the aggregated Preference Profile above. Not a
+  // trained model (no training pipeline exists in this architecture),
+  // just recent demonstrated preference the model should generalize from.
   const correctionsBlock = corrections && corrections.length
-    ? '\n\nPreference Model — examples of past predictions and what the user actually confirmed or changed. ' +
-      'Learn the PATTERN behind these (e.g. "routine errands score lower than I predicted", "school tasks near a stated exam date score higher"), not these exact titles:\n' +
+    ? '\n\nRecent examples of predictions and what the user actually confirmed or changed. ' +
+      'Learn the PATTERN behind these, not these exact titles:\n' +
       corrections.map(c => {
         if (c.outcome === 'corrected' && c.correction) {
           return '- "' + c.title + '" — I predicted [' + formatFieldsShort(c.prediction) + '], but the user corrected it to [' + formatFieldsShort(c.correction) + ']';
@@ -147,14 +174,23 @@ export function buildPrompt(titles, lifeContext, existingTasks, corrections, com
       completions.map(c => '- "' + c.title + '" — estimated ' + c.estimatedMinutes + 'm, actually took ' + c.actualMinutes + 'm' + (c.feeling ? ' (felt ' + c.feeling + ')' : '')).join('\n')
     : '';
 
+  // Per-task free text the user attached (a task's Details field) — the
+  // one thing a bare title can't convey. Only listed for tasks that have
+  // any; omitted entirely (falls back to the bare numbered list) when
+  // nothing has details.
+  const hasDetails = Array.isArray(details) && details.some(d => d && String(d).trim());
   const newBlock = '\n\nClassify these ' + titles.length + ' new task(s), in order:\n' +
-    titles.map((t, i) => (i + 1) + '. "' + t + '"').join('\n');
+    titles.map((t, i) => {
+      const d = hasDetails && details[i] ? String(details[i]).trim() : '';
+      return (i + 1) + '. "' + t + '"' + (d ? ' — Details: "' + d + '"' : '');
+    }).join('\n');
 
-  return contextBlock + existingBlock + correctionsBlock + completionsBlock + newBlock + '\n\n' +
+  return contextBlock + preferenceSummaryBlock + existingBlock + correctionsBlock + completionsBlock + newBlock + '\n\n' +
     'For each task, infer: lifeDomain, schoolClass, longTermROI, urgency, difficulty, estimatedMinutes, energyLevel, confidence, recurrence. ' +
     'IMPORTANT: spread your scores across the full 1-10 range based on real differences between these tasks and the ' +
-    'life context above — do not cluster everything at 5 or 6. A routine errand unrelated to any stated priority should ' +
-    'score low ROI; a task tied to a stated goal, deadline, or high-stakes project should score high. Report confidence ' +
+    'life context/Preference Profile above — do not cluster everything at 5 or 6. A routine errand unrelated to any stated priority should ' +
+    'score low ROI; a task tied to a stated goal, deadline, or high-stakes project should score high. Read each task\'s Details (if given) ' +
+    'and let it adjust ROI/urgency/difficulty/duration — it often says something the title alone can\'t. Report confidence ' +
     'honestly — below 90 is expected and fine for anything genuinely ambiguous; it triggers a quick human check rather than ' +
     'a wrong silent guess. Echo each task\'s exact title back in your response, in the same order given.';
 }
@@ -173,10 +209,12 @@ export default async function handler(req, res) {
   if (titles.length === 0) return res.status(400).json({ ok: false, error: 'titles required' });
   titles = titles.slice(0, MAX_TITLES_PER_CALL);
 
+  const details = Array.isArray(body && body.details) ? body.details.slice(0, titles.length) : [];
   const lifeContext = (body && body.lifeContext) ? String(body.lifeContext).slice(0, 4000) : '';
   const existingTasks = Array.isArray(body && body.existingTasks) ? body.existingTasks.slice(0, MAX_EXISTING_TASKS) : [];
   const corrections = Array.isArray(body && body.corrections) ? body.corrections.slice(0, MAX_CORRECTIONS) : [];
   const completions = Array.isArray(body && body.completions) ? body.completions.slice(0, MAX_COMPLETIONS) : [];
+  const preferenceSummary = (body && body.preferenceSummary) ? String(body.preferenceSummary).slice(0, MAX_PREFERENCE_SUMMARY_CHARS) : '';
 
   try {
     const client = new Anthropic({ apiKey });
@@ -187,7 +225,7 @@ export default async function handler(req, res) {
         effort: 'low', // fast, cheap classification — not a reasoning task
         format: { type: 'json_schema', schema: BATCH_SCHEMA },
       },
-      messages: [{ role: 'user', content: buildPrompt(titles, lifeContext, existingTasks, corrections, completions) }],
+      messages: [{ role: 'user', content: buildPrompt({ titles, details, lifeContext, existingTasks, corrections, completions, preferenceSummary }) }],
     });
 
     const textBlock = response.content.find((b) => b.type === 'text');

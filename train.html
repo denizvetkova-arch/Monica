@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="lock.js"></script>
+<script src="/api/config"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050506">
+<title>Training Session</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="sync.js" defer></script>
+<script src="topbar.js" defer></script>
+<script src="tasks.js" defer></script>
+<script src="preference-profile.js" defer></script>
+
+<style>
+:root {
+  --text-primary: #FAFAFA;
+  --text-secondary: #B8B6B0;
+  --text-tertiary: #76746E;
+  --success: #6BE3A4;
+  --accent: #E07658;
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: #050506;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+body {
+  min-height: 100vh; position: relative; overflow-x: hidden;
+  padding: max(28px, env(safe-area-inset-top)) 20px 60px;
+}
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background:
+    radial-gradient(circle at 82% 14%, rgba(224,118,88,0.16), transparent 45%),
+    radial-gradient(circle at 18% 90%, rgba(180,180,200,0.06), transparent 50%);
+  filter: blur(40px); pointer-events: none; z-index: -2;
+}
+.page { max-width: 480px; margin: 0 auto; }
+
+.head { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.dash-title {
+  margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.025em;
+  background: linear-gradient(180deg, #FFFFFF 0%, #C7C4BC 120%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+.icon-btn {
+  width: 42px; height: 42px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 12px; border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04); color: var(--text-secondary);
+  cursor: pointer; text-decoration: none;
+}
+.icon-btn svg { width: 22px; height: 22px; }
+
+.card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 18px;
+  padding: 22px;
+  margin-bottom: 18px;
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+}
+
+/* ===== Progress ===== */
+.progress-row { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--text-tertiary); margin-bottom: 8px; }
+.progress-streak { color: var(--accent); font-weight: 700; }
+.progress-bar { height: 8px; border-radius: 6px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #E07658, #FAFAFA); transition: width 0.3s ease; }
+
+/* ===== Flashcard ===== */
+.card-title { font-size: 19px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin-bottom: 20px; }
+.field-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 8px; display: block; }
+.field { margin-bottom: 18px; }
+
+.pill-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill-btn {
+  border: 1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.03);
+  color: var(--text-secondary); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  border-radius: 10px; padding: 9px 13px; cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pill-btn.on { background: rgba(224,118,88,0.18); border-color: rgba(224,118,88,0.55); color: var(--text-primary); }
+.pill-btn:hover { background: rgba(255,255,255,0.07); }
+
+.metric-row { display: flex; gap: 10px; }
+.metric-box { flex: 1; text-align: center; }
+.metric-input {
+  width: 100%; padding: 10px; text-align: center;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+  background: rgba(0,0,0,0.3); color: var(--text-primary);
+  font-family: inherit; font-size: 15px; outline: none;
+}
+.set-input {
+  width: 100%; padding: 11px 13px;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 11px;
+  background: rgba(0,0,0,0.3); color: var(--text-primary);
+  font-family: inherit; font-size: 14px; outline: none;
+}
+.set-textarea {
+  width: 100%; min-height: 70px; resize: vertical;
+  padding: 10px 12px; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+  background: rgba(0,0,0,0.3); color: var(--text-primary);
+  font-family: inherit; font-size: 13px; line-height: 1.5; outline: none;
+}
+.set-textarea::placeholder { color: var(--text-tertiary); }
+
+.cadence-row { margin-top: 10px; }
+
+.btn-confirm {
+  width: 100%; margin-top: 4px; padding: 14px; border: 0; border-radius: 12px;
+  background: linear-gradient(180deg,#FFFFFF,#E8E5DD); color: #0A0A0B;
+  font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 22px rgba(0,0,0,0.25);
+}
+.btn-confirm:hover { filter: brightness(1.05); }
+
+/* ===== Learned callout ===== */
+.learned-emoji { font-size: 34px; text-align: center; margin-bottom: 14px; }
+.learned-text { font-size: 15px; color: var(--text-primary); text-align: center; line-height: 1.5; margin-bottom: 22px; }
+.btn-continue {
+  width: 100%; padding: 14px; border: 0; border-radius: 12px;
+  background: linear-gradient(180deg,#FFFFFF,#E8E5DD); color: #0A0A0B;
+  font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 22px rgba(0,0,0,0.25);
+}
+.btn-continue:hover { filter: brightness(1.05); }
+
+/* ===== Empty state ===== */
+.empty-state { text-align: center; padding: 30px 10px; }
+.empty-emoji { font-size: 40px; margin-bottom: 14px; }
+.empty-title { font-size: 17px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
+.empty-sub { font-size: 13px; color: var(--text-tertiary); margin-bottom: 22px; line-height: 1.5; }
+.empty-link {
+  display: inline-block; padding: 12px 22px; border-radius: 12px; text-decoration: none;
+  background: linear-gradient(180deg, #FFFFFF 0%, #E8E5DD 100%); color: #0A0A0B;
+  font-family: inherit; font-size: 13px; font-weight: 700;
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <a class="icon-btn" href="manage.html" aria-label="Back to Manage Tasks">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>
+      </svg>
+    </a>
+    <h1 class="dash-title">Training Session</h1>
+  </div>
+
+  <div class="card" id="progressCard" style="display:none">
+    <div class="progress-row">
+      <span id="progressLabel">Task 1 of 1</span>
+      <span class="progress-streak" id="progressStreak"></span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <div class="card" id="flashcardView" style="display:none">
+    <div class="card-title" id="cardTitle"></div>
+
+    <div class="field">
+      <label class="field-label">Life Domain</label>
+      <div class="pill-grid" id="domainGrid"></div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Energy Required</label>
+      <div class="pill-grid" id="energyGrid"></div>
+    </div>
+
+    <div class="field">
+      <div class="metric-row">
+        <div class="metric-box">
+          <label class="field-label">ROI</label>
+          <input class="metric-input" id="roiInput" type="number" min="1" max="10" inputmode="numeric">
+        </div>
+        <div class="metric-box">
+          <label class="field-label">Urgency</label>
+          <input class="metric-input" id="urgencyInput" type="number" min="1" max="10" inputmode="numeric">
+        </div>
+        <div class="metric-box">
+          <label class="field-label">Difficulty</label>
+          <input class="metric-input" id="difficultyInput" type="number" min="1" max="10" inputmode="numeric">
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Duration (minutes)</label>
+      <input class="set-input" id="minutesInput" type="number" min="1" max="480" inputmode="numeric">
+    </div>
+
+    <div class="field">
+      <label class="field-label">Recurring?</label>
+      <div class="pill-grid" id="recurringGrid">
+        <button type="button" class="pill-btn" data-r="no">No</button>
+        <button type="button" class="pill-btn" data-r="yes">Yes</button>
+      </div>
+      <div class="pill-grid cadence-row" id="cadenceGrid" style="display:none">
+        <button type="button" class="pill-btn" data-c="daily">Daily</button>
+        <button type="button" class="pill-btn" data-c="weekly">Weekly</button>
+        <button type="button" class="pill-btn" data-c="monthly">Monthly</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Details (optional)</label>
+      <textarea class="set-textarea" id="detailsInput" placeholder="Any context that changes how this should be scored…"></textarea>
+    </div>
+
+    <button class="btn-confirm" id="confirmBtn" type="button">Confirm &amp; Next</button>
+  </div>
+
+  <div class="card" id="learnedView" style="display:none">
+    <div class="learned-emoji">💡</div>
+    <div class="learned-text" id="learnedText"></div>
+    <button class="btn-continue" id="continueBtn" type="button">Continue</button>
+  </div>
+
+  <div class="card" id="emptyView" style="display:none">
+    <div class="empty-state">
+      <div class="empty-emoji">🎉</div>
+      <div class="empty-title">All caught up</div>
+      <div class="empty-sub">Every task reflects your judgment. New tasks will show up here as they're added.</div>
+      <a class="empty-link" href="manage.html">Back to Manage Tasks</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const CATEGORY_EMOJI = { career: '💼', school: '📚', debate: '🎤', glp1_research: '🧪', finance: '💰', personal: '🌱', extracurricular: '🎯', health: '💊' };
+  const DOMAIN_LABELS = { career: 'Career', school: 'School', debate: 'Debate', glp1_research: 'GLP-1 Research', finance: 'Finance', personal: 'Personal', extracurricular: 'Extracurricular', health: 'Health' };
+  const ENERGY_LABELS = { very_low: 'Very Low', low: 'Low', medium: 'Medium', high: 'High', deep_focus: 'Deep Focus' };
+
+  function whenReady(fn) {
+    if (window.Tasks && window.PreferenceProfile) { fn(); return; }
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.Tasks && window.PreferenceProfile) fn();
+      else setTimeout(() => window.Tasks && window.PreferenceProfile && fn(), 50);
+    });
+  }
+
+  let queue = [];
+  let idx = 0;
+  let sessionCount = 0;
+
+  // Current card's in-progress selections — reset each time a new card loads.
+  let sel = { domain: 'personal', energy: 'medium', roi: 5, urgency: 5, difficulty: 5, minutes: 30, recurring: 'no', cadence: 'weekly', details: '' };
+
+  function buildPillGrid(container, options, labelFn, selectedValue, onSelect) {
+    container.innerHTML = '';
+    options.forEach(opt => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pill-btn' + (opt === selectedValue ? ' on' : '');
+      btn.textContent = labelFn(opt);
+      btn.addEventListener('click', () => onSelect(opt));
+      container.appendChild(btn);
+    });
+  }
+
+  function renderDomainGrid() {
+    buildPillGrid($('domainGrid'), window.Tasks.CATEGORIES, (d) => (CATEGORY_EMOJI[d] || '') + ' ' + (DOMAIN_LABELS[d] || d), sel.domain, (d) => {
+      sel.domain = d;
+      renderDomainGrid();
+    });
+  }
+  function renderEnergyGrid() {
+    buildPillGrid($('energyGrid'), window.Tasks.ENERGY_LEVELS, (e) => ENERGY_LABELS[e] || e, sel.energy, (e) => {
+      sel.energy = e;
+      renderEnergyGrid();
+    });
+  }
+  function renderRecurringGrid() {
+    document.querySelectorAll('#recurringGrid .pill-btn').forEach(b => b.classList.toggle('on', b.dataset.r === sel.recurring));
+    $('cadenceGrid').style.display = sel.recurring === 'yes' ? '' : 'none';
+    document.querySelectorAll('#cadenceGrid .pill-btn').forEach(b => b.classList.toggle('on', b.dataset.c === sel.cadence));
+  }
+
+  function showView(name) {
+    ['progressCard', 'flashcardView', 'learnedView', 'emptyView'].forEach(id => { $(id).style.display = 'none'; });
+    if (name !== 'empty') $('progressCard').style.display = '';
+    $((name === 'card' ? 'flashcardView' : name === 'learned' ? 'learnedView' : 'emptyView')).style.display = '';
+  }
+
+  function updateProgress() {
+    const total = queue.length; // frozen snapshot size — idx is a plain position counter into it
+    $('progressLabel').textContent = 'Task ' + Math.min(idx + 1, total) + ' of ' + total;
+    $('progressFill').style.width = total > 0 ? Math.round((idx / total) * 100) + '%' : '0%';
+    $('progressStreak').textContent = sessionCount > 0 ? '🔥 ' + sessionCount + ' this session' : '';
+  }
+
+  function renderCard() {
+    if (idx >= queue.length) { showView('empty'); return; }
+    const task = queue[idx];
+    sel = {
+      domain: task.lifeDomain || 'personal',
+      energy: task.energyLevel || 'medium',
+      roi: task.longTermROI != null ? task.longTermROI : 5,
+      urgency: task.urgency != null ? task.urgency : 5,
+      difficulty: task.difficulty != null ? task.difficulty : 5,
+      minutes: task.estimatedMinutes != null ? task.estimatedMinutes : 30,
+      recurring: task.recurrence ? 'yes' : 'no',
+      cadence: task.recurrence || 'weekly',
+      details: task.details || '',
+    };
+    $('cardTitle').textContent = task.title;
+    renderDomainGrid();
+    renderEnergyGrid();
+    $('roiInput').value = sel.roi;
+    $('urgencyInput').value = sel.urgency;
+    $('difficultyInput').value = sel.difficulty;
+    $('minutesInput').value = sel.minutes;
+    $('detailsInput').value = sel.details;
+    renderRecurringGrid();
+    updateProgress();
+    showView('card');
+  }
+
+  function buildLearnedMessage(before, after, domain) {
+    const domainLabel = DOMAIN_LABELS[domain] || domain;
+    const beforeSample = (before.domains[domain] && before.domains[domain].sampleSize) || 0;
+    const afterSample = (after.domains[domain] && after.domains[domain].sampleSize) || 0;
+    const lines = [];
+    if (beforeSample === 0) {
+      lines.push('First example logged for ' + domainLabel + ' — a couple more and Monica will start finding a pattern.');
+    } else {
+      const beforeConf = window.PreferenceProfile.confidencePct(beforeSample);
+      const afterConf = window.PreferenceProfile.confidencePct(afterSample);
+      const delta = afterConf - beforeConf;
+      lines.push(domainLabel + ' confidence is now ' + afterConf + '%' + (delta > 0 ? ' (+' + delta + '%)' : '') + '.');
+    }
+    // A keyword association that just crossed the "enough data" threshold
+    // for the first time — profile.keywords only includes a word once
+    // it's been seen enough times, so "new in `after`" means "just learned."
+    const newWords = Object.keys(after.keywords).filter(w => !(w in before.keywords));
+    if (newWords.length) {
+      const w = after.keywords[newWords[0]];
+      if (w.domainShift) {
+        lines.push('Monica just learned: tasks mentioning "' + newWords[0] + '" are usually ' + (DOMAIN_LABELS[w.dominantDomain] || w.dominantDomain) + '.');
+      } else if (w.urgencyBias != null && Math.abs(w.urgencyBias) >= 1.5) {
+        lines.push('Monica just learned: tasks mentioning "' + newWords[0] + '" are usually ' + (w.urgencyBias > 0 ? 'high' : 'low') + ' urgency.');
+      }
+    }
+    return lines.join(' ');
+  }
+
+  function submitCard() {
+    const task = queue[idx];
+    const fields = {
+      lifeDomain: sel.domain,
+      schoolClass: null,
+      longTermROI: sel.roi,
+      urgency: sel.urgency,
+      difficulty: sel.difficulty,
+      estimatedMinutes: sel.minutes,
+      energyLevel: sel.energy,
+      recurrence: sel.recurring === 'yes' ? sel.cadence : null,
+      details: sel.details,
+    };
+    const before = window.PreferenceProfile.computeProfile();
+    window.Tasks.recordManualClassification(task.id, fields);
+    const after = window.PreferenceProfile.computeProfile();
+    const msg = buildLearnedMessage(before, after, sel.domain);
+    sessionCount += 1;
+    idx += 1;
+    $('learnedText').textContent = msg || 'Got it — noted.';
+    updateProgress();
+    showView('learned');
+  }
+
+  function wireStaticControls() {
+    document.querySelectorAll('#recurringGrid .pill-btn').forEach(b => {
+      b.addEventListener('click', () => { sel.recurring = b.dataset.r; renderRecurringGrid(); });
+    });
+    document.querySelectorAll('#cadenceGrid .pill-btn').forEach(b => {
+      b.addEventListener('click', () => { sel.cadence = b.dataset.c; renderRecurringGrid(); });
+    });
+    $('roiInput').addEventListener('change', () => { sel.roi = Math.min(10, Math.max(1, parseInt($('roiInput').value, 10) || sel.roi)); $('roiInput').value = sel.roi; });
+    $('urgencyInput').addEventListener('change', () => { sel.urgency = Math.min(10, Math.max(1, parseInt($('urgencyInput').value, 10) || sel.urgency)); $('urgencyInput').value = sel.urgency; });
+    $('difficultyInput').addEventListener('change', () => { sel.difficulty = Math.min(10, Math.max(1, parseInt($('difficultyInput').value, 10) || sel.difficulty)); $('difficultyInput').value = sel.difficulty; });
+    $('minutesInput').addEventListener('change', () => { sel.minutes = Math.min(480, Math.max(1, parseInt($('minutesInput').value, 10) || sel.minutes)); $('minutesInput').value = sel.minutes; });
+    $('detailsInput').addEventListener('change', () => { sel.details = $('detailsInput').value; });
+    $('confirmBtn').addEventListener('click', submitCard);
+    $('continueBtn').addEventListener('click', renderCard);
+  }
+
+  whenReady(function () {
+    // `queue` is a deliberately FROZEN snapshot for the whole session —
+    // `idx` is a plain position counter into it, not re-derived from live
+    // data. Submitting a card fires 'tasks-changed' (every updateTask
+    // does), which would otherwise race with our own writes: filtering
+    // queue down to "still needs review" on every change would drop
+    // already-processed entries out from under `idx` and desync the
+    // progress bar / card order mid-session. Simplest safe fix: don't
+    // react to 'tasks-changed' at all here. Editing the same task
+    // elsewhere mid-session just means this card re-submits over
+    // whatever was there — harmless, not a corruption risk.
+    queue = window.Tasks.getTasks().filter(t => !t.userReviewed).sort((a, b) => a.createdAt - b.createdAt);
+    wireStaticControls();
+    renderCard();
+
+    if (typeof initCloudSync === 'function') {
+      initCloudSync({ appKey: 'tasks', syncedKeys: ['tasks_v1'] });
+    }
+  });
+})();
+</script>
+</body>
+</html>

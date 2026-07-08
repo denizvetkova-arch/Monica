@@ -19,7 +19,10 @@
   // 'health' is added beyond the user's original 7-item list since
   // gym/water tracking already exists in this app and needs a home.
   const CATEGORIES = ['career', 'school', 'debate', 'glp1_research', 'finance', 'personal', 'extracurricular', 'health'];
-  const ENERGY_LEVELS = ['low', 'medium', 'high'];
+  // 5-level — was 3 (low/medium/high). The three old values stay valid
+  // strings in the new set, so existing tasks need no data rewrite; only
+  // 'very_low' and 'deep_focus' are net-new choices going forward.
+  const ENERGY_LEVELS = ['very_low', 'low', 'medium', 'high', 'deep_focus'];
 
   // Bump this whenever classify-task.js's scoring changes meaningfully
   // (e.g. the AI Training Mode rewrite that added confidence/Preference
@@ -67,6 +70,13 @@
     if (m.predictionConfidence === undefined) m.predictionConfidence = null;
     if (m.pendingPrediction === undefined) m.pendingPrediction = null;
     if (m.recurrence === undefined) m.recurrence = null;
+    if (m.details === undefined) m.details = '';
+    if (m.skipCount == null) m.skipCount = 0;
+    // True once a human has explicitly confirmed or set this task's
+    // classification (review-card approve/fix, a manual field edit, or a
+    // Training Session submission) — see needsReclassification below, which
+    // uses this to never silently overwrite a human's own judgment.
+    if (m.userReviewed === undefined) m.userReviewed = false;
     if (m.classificationVersion == null) {
       // Tasks classified before this field existed were scored by an older,
       // generic version of classify-task.js (no confidence, no Preference
@@ -109,6 +119,9 @@
       completedAt: null,
       snoozedUntil: null,
       recurrence: null,
+      details: partial.details || '',
+      skipCount: 0,
+      userReviewed: false,
       // True once classify-task.js has filled in the fields above from the
       // title — false means the row is still showing inferred defaults.
       classified: !!partial.classified,
@@ -155,6 +168,9 @@
       actualMinutes: feedback && feedback.actualMinutes != null ? feedback.actualMinutes : null,
       feeling: feedback && feedback.feeling ? feedback.feeling : null,
       wasSubtask: !!(feedback && feedback.wasSubtask),
+      // Procrastination signal input for preference-profile.js: how many
+      // times this task was skipped before it finally got done.
+      skipCountAtCompletion: task.skipCount || 0,
     });
     while (list.length > COMPLETIONS_CAP) list.shift();
     try { localStorage.setItem(COMPLETIONS_KEY, JSON.stringify(list)); } catch (e) {}
@@ -212,10 +228,16 @@
   }
 
   // True for anything scored by an older classifier version (or never
-  // scored at all) — what "Reclassify Entire Database" targets. Doesn't
-  // look at task.done: completed tasks keep their real metadata too, since
+  // scored at all) AND never confirmed by a human — what "Reclassify Entire
+  // Database" targets. Once a human has explicitly judged a task
+  // (userReviewed), it's excluded even if stale: the whole point of a
+  // Preference Model is that a human's own correction is ground truth for
+  // THAT task forever, not something an automated pass silently overwrites
+  // — Monica's model improves for future/other tasks instead. Doesn't look
+  // at task.done: completed tasks keep their real metadata too, since
   // historical-productivity/duration-calibration signals read from them.
   function needsReclassification(task) {
+    if (task.userReviewed) return false;
     return task.classificationVersion == null || task.classificationVersion < CLASSIFICATION_VERSION;
   }
 
@@ -264,7 +286,7 @@
     const prediction = task.pendingPrediction || pickClassificationFields(task);
     const isCorrection = correctedFields != null;
     const finalFields = isCorrection ? pickClassificationFields(correctedFields) : prediction;
-    const updated = updateTask(id, Object.assign({}, finalFields, { needsReview: false, pendingPrediction: null, classificationVersion: CLASSIFICATION_VERSION }));
+    const updated = updateTask(id, Object.assign({}, finalFields, { needsReview: false, pendingPrediction: null, classificationVersion: CLASSIFICATION_VERSION, userReviewed: true }));
     logCorrection({
       title: task.title,
       prediction,
@@ -275,11 +297,59 @@
     return updated;
   }
 
+  // Every manual field edit teaches Monica something, not just corrections
+  // made through the review card's "Fix" flow — this is what makes plain
+  // Edit-mode changes in manage.html feed the Preference Model too. Logs a
+  // single-field, sparse correction entry; a no-op if nothing changed
+  // (e.g. re-selecting the same dropdown value).
+  function logManualEdit(title, field, oldValue, newValue) {
+    if (oldValue === newValue) return;
+    logCorrection({
+      title,
+      prediction: { [field]: oldValue != null ? oldValue : null },
+      correction: { [field]: newValue != null ? newValue : null },
+      confidence: null,
+      outcome: 'manual_edit',
+    });
+  }
+
+  // Used by the Training Session (train.html): the user classified this
+  // task from scratch rather than correcting an AI prediction. Applies all
+  // fields, marks it reviewed (excluded from future automatic reclassify),
+  // and logs one full-shape correction so it counts as a real training
+  // example for the Preference Profile.
+  function recordManualClassification(id, fields) {
+    const list = getTasks();
+    const task = list.find(t => t.id === id);
+    if (!task) return null;
+    const prediction = pickClassificationFields(task);
+    const finalFields = pickClassificationFields(fields);
+    const patch = Object.assign({}, finalFields, {
+      classified: true,
+      userReviewed: true,
+      needsReview: false,
+      pendingPrediction: null,
+    });
+    // details isn't a classification output (pickClassificationFields
+    // ignores it), but the Training Session still lets the user attach it.
+    if (fields && fields.details != null) patch.details = fields.details;
+    const updated = updateTask(id, patch);
+    logCorrection({ title: task.title, prediction, correction: finalFields, confidence: null, outcome: 'manual_review' });
+    return updated;
+  }
+
   // Snooze a task out of ranking contention for a while — this is what
   // the Skip button does, instead of a manual "queue" flag like goals has.
+  // Also counts how many times this has happened (skipCount), the raw
+  // input for a per-domain procrastination signal in preference-profile.js
+  // — previously snoozedUntil was a single overwritable timestamp with no
+  // history of how many times a task got pushed.
   function skipTask(id, snoozeMinutes) {
     const mins = snoozeMinutes != null ? snoozeMinutes : 60;
-    return updateTask(id, { snoozedUntil: Date.now() + mins * 60000 });
+    const list = getTasks();
+    const task = list.find(t => t.id === id);
+    const skipCount = (task && task.skipCount || 0) + 1;
+    return updateTask(id, { snoozedUntil: Date.now() + mins * 60000, skipCount });
   }
 
   function removeTask(id) {
@@ -331,14 +401,16 @@
     const storedUrgency = (task.urgency != null ? task.urgency : 5) / 10;
     return Math.max(deadlineUrgency, storedUrgency * 0.7);
   }
-  // required: task's energyLevel ('low'|'medium'|'high').
-  // current: the Adaptive Energy Model's 5-level label, or (for backward
-  // compatibility) an old 3-level one — both map onto the same 1-3 scale.
+  // required: task's energyLevel (5-level: very_low/low/medium/high/deep_focus).
+  // current: the Adaptive Energy Model's 5-level label (very_low/low/
+  // moderate/high/peak — different label set, same 1-3 scale, deliberately
+  // mirrored 1:1 with the required-side table below: deep_focus<->peak,
+  // high<->high, medium<->moderate, low<->low, very_low<->very_low).
   function energyFit(required, current) {
     if (!current) return 0.6;
-    const reqLvl = { low: 1, medium: 2, high: 3 }[required] || 2;
+    const reqLvl = { very_low: 1, low: 1.5, medium: 2, high: 2.5, deep_focus: 3 }[required];
     const curLvl = { very_low: 1, low: 1.5, moderate: 2, high: 2.5, peak: 3 }[current];
-    if (curLvl == null) return 0.6;
+    if (reqLvl == null || curLvl == null) return 0.6;
     const diff = Math.abs(reqLvl - curLvl);
     if (diff <= 0.25) return 1.0;
     if (diff <= 1) return 0.55;
@@ -726,6 +798,8 @@
     rankTasks,
     applyClassification,
     resolveReview,
+    logManualEdit,
+    recordManualClassification,
     getRecentCorrections,
     getRecentCompletions,
     getGcalTokens,

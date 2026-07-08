@@ -44,7 +44,7 @@
     const roughDailyTargetG = 90;
     const expectedByNow = roughDailyTargetG * dayFraction;
     const sufficient = nutrition.proteinG >= expectedByNow * 0.7;
-    if (!sufficient && task.energyLevel === 'high') {
+    if (!sufficient && (task.energyLevel === 'high' || task.energyLevel === 'deep_focus')) {
       return { delta: -8, note: 'protein intake behind for this point in the day' };
     }
     return { delta: 0, note: sufficient ? 'Protein intake already sufficient' : null };
