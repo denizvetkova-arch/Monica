@@ -136,8 +136,9 @@ along automatically.
      safely ignored).
    - Trigger: **Automatic** (background delivery) for the closest thing to continuous sync;
      a fixed interval (e.g. hourly) also works and is more predictable.
-5. Run the automation once manually to confirm it works, then open the site → gear icon →
-   **Settings** → **Apple Health** box should flip to "Syncing" with a few stats filled in.
+5. Run the automation once manually to confirm it works, then open the site → **Main** tile →
+   **gear icon** → **Settings** → **Apple Health** box should flip to "Syncing" with a few
+   stats filled in.
 
 > The webhook **discards the raw payload** after extracting aggregate numbers — it never
 > stores minute-by-minute samples or workout GPS routes, only daily totals/averages.
@@ -156,7 +157,7 @@ hours/week).
 
 ## 5. Google Calendar (optional)
 
-Lets the decision screen (`index.html`) see your free/busy time and favor tasks that fit
+Lets the decision screen (`today.html`) see your free/busy time and favor tasks that fit
 the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minutes.
 
 1. Go to **console.cloud.google.com** → create a new project (or pick an existing one).
@@ -179,13 +180,13 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 | `GOOGLE_CLIENT_ID` | your OAuth client's Client ID |
 | `GOOGLE_CLIENT_SECRET` | your OAuth client's Client secret (**secret**) |
 
-6. Redeploy. Open the site → tap the **gear icon** on the home screen → **Connect Google Calendar**.
+6. Redeploy. Open the site → **Main** tile → tap the **gear icon** → **Connect Google Calendar**.
 
 > Unlike WHOOP, the redirect URI here is a **fixed constant** in the code
 > (`https://monica-zeta-blue.vercel.app/api/google-callback`), not auto-detected from the
 > domain — Google requires an exact match against the one URI registered above, so opening
 > the site via a Vercel preview URL will not work for this feature. If you ever fork this to
-> a different domain, update the hardcoded URL in both `index.html` and
+> a different domain, update the hardcoded URL in both `today.html` and
 > `api/google-callback.js` to match, and add the new URI in Google Cloud Console too.
 > Calendar access is **read-only** (`calendar.readonly` scope) — this app never creates,
 > edits, or deletes events.
@@ -194,7 +195,7 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 
 ## 6. Automatic task classification (optional, but the point of Manage Tasks)
 
-Lets **Manage Tasks** (the list icon on the home screen) infer category, ROI, urgency,
+Lets **Manage Tasks** (the list icon on the Main screen) infer category, ROI, urgency,
 difficulty, and estimated time from just a task title — "Email professor" or "Costco"
 gets classified without you touching a dropdown. Runs **server-side** (unlike Nova below),
 so it works from every device without re-entering a key on each one.

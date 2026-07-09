@@ -598,10 +598,10 @@
 
   // ---------- Adaptive Energy Model ----------
   // Blends Apple Health (via health_metrics_v1, written server-side by
-  // api/health-import.js), hydration (po_water_v1, already tracked
-  // locally by the water tracker), and caffeine (caf:logs, already
-  // tracked locally by caffeine.html) into a 5-level energy signal for
-  // the ranking algorithm and a human-readable summary for display.
+  // api/health-import.js), hydration (a fixed known-good score — this user
+  // is always well hydrated, see hydrationSubscore), and caffeine (caf:logs,
+  // already tracked locally by caffeine.html) into a 5-level energy signal
+  // for the ranking algorithm and a human-readable summary for display.
   // Every input degrades to a neutral subscore when missing, so this
   // works with zero, partial, or full data.
   const HEALTH_METRICS_KEY = 'health_metrics_v1';
@@ -650,25 +650,16 @@
     return { score: 70, note: null };
   }
 
-  // Rough, non-personalized proxy (same spirit as the protein-pacing check
-  // in decision-engine.js): compares today's logged water-tracker entries
-  // against a flat assumed daily target, scaled by how much of the waking
-  // day has passed. Not unit-aware (bottle vs glass vs oz) on purpose —
-  // precise hydration math already lives in topbar.js/po-water.html; this
-  // just needs a rough "behind or not" signal.
-  function hydrationSubscore(now) {
-    const water = loadJSON('po_water_v1', null);
-    if (!water) return { score: 60, note: null };
-    const d = new Date(now);
-    const todayKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    const done = (water.logs || {})[todayKey] || 0;
-    const hour = d.getHours();
-    const dayFraction = Math.min(1, Math.max(0.1, (hour - 7) / 15));
-    const roughTarget = 6;
-    const expectedByNow = roughTarget * dayFraction;
-    if (done === 0 && hour >= 10) return { score: 40, note: 'low hydration today' };
-    if (done < expectedByNow * 0.5) return { score: 50, note: null };
-    return { score: 75, note: null };
+  // Known personal fact, not a live signal: this user drinks well over a
+  // gallon a day and is always well hydrated — there's no water tracker in
+  // the nav anymore to log otherwise, and there never needs to be. Fixed
+  // high score (same tier as "good sleep"/"worked out today" elsewhere in
+  // this model) rather than reading po_water_v1, which nothing populates
+  // day-to-day now. (This function's signature is kept — still one of the
+  // weighted subscores in getEnergyContext below — but it no longer looks
+  // at logged data at all.)
+  function hydrationSubscore() {
+    return { score: 90, note: null };
   }
 
   function heartRateSubscore(restingHR) {
@@ -711,7 +702,7 @@
     const steps = stepsSubscore(health && health.steps);
     const workout = workoutSubscore(health && health.workoutsToday, now);
     const nutrition = nutritionSubscore(health && health.dietaryEnergyKcal, now);
-    const hydration = hydrationSubscore(now);
+    const hydration = hydrationSubscore();
     const heartRate = heartRateSubscore(health && health.restingHR);
 
     const weighted = [

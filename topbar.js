@@ -2,22 +2,13 @@
 // Persistent dashboard top bar.
 // Drop this on any page with:
 //     <script src="topbar.js" defer></script>
-// It self-injects HTML + CSS, reads progress from the same
-// localStorage keys the dashboard's tabs already use, and a
-// water "+1" button writes to localStorage and (if configured)
-// pushes a merged update to the Supabase health row so the
-// new bottle appears on every device within ~1 second.
+// It self-injects HTML + CSS: a Finance quick-link up top and an
+// Instagram-style Main/Health/Fitness tab bar at the bottom. (No water
+// widget — Monica treats hydration as a known non-issue, not something
+// tracked per page; see tasks.js's hydrationSubscore.)
 // =============================================================
 (function () {
   'use strict';
-
-  // -------- Supabase config (same project as the rest of the dashboard) --------
-  // For your audience's standalone, replace these with placeholders
-  // and have them paste their own values, just like the other pages.
-  // Prefer Vercel env vars (served via /api/config → window.DASH_*),
-  // otherwise fall back to these defaults.
-  const TOPBAR_SUPABASE_URL = (window.DASH_SUPABASE_URL) || 'https://srajryooffirbroltjmg.supabase.co';
-  const TOPBAR_SUPABASE_KEY = (window.DASH_SUPABASE_KEY) || 'sb_publishable_5142ZwTLF_DkSVRzciNuRA_bHwRAu4c';
 
   // -------- CSS --------
   const css = `
@@ -29,55 +20,6 @@
   background: #0a0a0b;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
-}
-.topbar-water-wrap {
-  display: flex; align-items: stretch;
-}
-.topbar-water-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 9px 14px;
-  background: rgba(125, 211, 252, 0.08);
-  border: 1px solid rgba(125, 211, 252, 0.16);
-  border-right: none;
-  border-radius: 12px 0 0 12px;
-  text-decoration: none;
-  color: #FAFAFA;
-  -webkit-tap-highlight-color: transparent;
-}
-.topbar-water-pill .topbar-pill-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #7DD3FC; flex-shrink: 0;
-}
-.topbar-water-pill.warn .topbar-pill-dot { background: #fbbf24; }
-.topbar-water-pill.miss .topbar-pill-dot {
-  background: #ff8a8a;
-  animation: topbar-miss-pulse 1.6s ease-in-out infinite;
-}
-@keyframes topbar-miss-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
-  50%      { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
-}
-.topbar-pill-count {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px; font-weight: 700;
-  color: #FAFAFA;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.topbar-water-add {
-  width: 44px;
-  border: 1px solid rgba(125, 211, 252, 0.16);
-  background: linear-gradient(180deg, rgba(125, 211, 252, 0.28), rgba(110, 231, 183, 0.28));
-  color: #FFFFFF;
-  font-family: inherit; font-size: 20px; font-weight: 700; line-height: 1;
-  cursor: pointer;
-  border-radius: 0 12px 12px 0;
-  -webkit-tap-highlight-color: transparent;
-  transition: background 0.15s, transform 0.10s;
-}
-.topbar-water-add:active { transform: scale(0.94); }
-.topbar-water-add.flash {
-  background: linear-gradient(180deg, rgba(125, 211, 252, 0.7), rgba(110, 231, 183, 0.7));
 }
 .topbar-finance-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -139,9 +81,6 @@ body.has-bottombar {
 
 @media (max-width: 480px) {
   .topbar { padding-left: 10px; padding-right: 10px; gap: 6px; }
-  .topbar-water-pill { padding: 8px 11px; gap: 6px; }
-  .topbar-pill-count { font-size: 12px; }
-  .topbar-water-add { width: 40px; font-size: 18px; }
   .topbar-finance-btn { width: 40px; height: 38px; }
   .topbar-finance-icon { font-size: 18px; }
   .bottombar-tab-icon { font-size: 22px; }
@@ -197,13 +136,6 @@ body.topbar-modal-open {
   // -------- HTML --------
   const topbarHtml = `
 <header class="topbar" id="topbar" role="navigation" aria-label="Quick actions">
-  <div class="topbar-water-wrap">
-    <a href="health.html#water" class="topbar-water-pill" id="topbarWater" aria-label="Water progress">
-      <span class="topbar-pill-dot"></span>
-      <span class="topbar-pill-count" id="topbarWaterCount">0/0</span>
-    </a>
-    <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one drink" type="button">+</button>
-  </div>
   <a href="finance.html" class="topbar-finance-btn" id="topbarFinance" aria-label="Finance">
     <span class="topbar-finance-icon">📊</span>
   </a>
@@ -212,7 +144,7 @@ body.topbar-modal-open {
 
   const bottombarHtml = `
 <nav class="bottombar" id="bottombar" role="navigation" aria-label="Main tabs">
-  <a href="index.html" class="bottombar-tab" data-page="main">
+  <a href="today.html" class="bottombar-tab" data-page="main">
     <span class="bottombar-tab-icon">🏠</span>
     <span>Main</span>
   </a>
@@ -245,7 +177,8 @@ body.topbar-modal-open {
     const p = (window.location.pathname || '').toLowerCase();
     if (p.endsWith('health.html')) return 'health';
     if (p.endsWith('gym.html')) return 'fitness';
-    return 'main'; // index.html, /, or anything else falls back to main
+    if (p.endsWith('today.html')) return 'main';
+    return null; // index.html (the home bento grid), /, or anything else — no tab active
   }
 
   function injectStyleAndHTML() {
@@ -285,13 +218,6 @@ body.topbar-modal-open {
       String(d.getMonth() + 1).padStart(2, '0') + '-' +
       String(d.getDate()).padStart(2, '0');
   }
-  function calendarDateKey() {
-    const d = new Date();
-    return d.getFullYear() + '-' +
-      String(d.getMonth() + 1).padStart(2, '0') + '-' +
-      String(d.getDate()).padStart(2, '0');
-  }
-
   // -------- Read progress from localStorage --------
   function getGoalsProgress() {
     const key = 'goals:' + activeDateKey();
@@ -310,109 +236,6 @@ body.topbar-modal-open {
     const total = Array.isArray(items) ? items.length : 0;
     const done = total ? items.filter(i => i && taken[i.id]).length : 0;
     return { done, total };
-  }
-
-  function getWaterProgress() {
-    let state = null;
-    try { state = JSON.parse(localStorage.getItem('po_water_v1')); } catch (e) {}
-    if (!state) return { done: 0, total: 0 };
-    const todayKey = calendarDateKey();
-    const done = (state.logs || {})[todayKey] || 0;
-    const p = state.profile || { weightKg: 75 };
-    const wKg = state.weightUnit === 'lb' ? (p.weightKg || 0) / 2.20462 : (p.weightKg || 0);
-    const base = wKg * 35;
-    const exercise = (p.activityHrsPerWeek || 0) / 7 * 500;
-    const caffeine = Math.max(0, (state.caffeineMgPerDay || 0) - 200) * 1.5;
-    const subs = (state.substances || []).reduce((s, x) => {
-      const dose = (x && x.dose != null ? x.dose : (x && x.defaultDose)) || 0;
-      return s + Math.max(0, dose * ((x && x.mlPerUnit) || 0));
-    }, 0);
-    let adjust = 0;
-    if (p.sex === 'm') adjust += 200;
-    if ((p.age || 0) >= 50) adjust += 100;
-    const totalMl = base + exercise + caffeine + subs + adjust;
-    let unitVol;
-    if (state.unit === 'glass') unitVol = state.glassMl || 250;
-    else if (state.unit === 'oz') unitVol = 30;
-    else if (state.unit === 'ml') unitVol = 1;
-    else unitVol = state.bottleMl || 500;
-    const total = Math.max(1, Math.ceil(totalMl / unitVol));
-    return { done, total };
-  }
-
-  function classifyStatus(done, total) {
-    if (total === 0) return 'idle';
-    if (done >= total) return 'good';
-    if (done >= total * 0.5) return 'warn';
-    // Past 6pm and still under half → flag as missed
-    const h = new Date().getHours();
-    if (h >= 18 && done < total * 0.5) return 'miss';
-    return 'warn';
-  }
-
-  function setPillStatus(pillEl, status) {
-    pillEl.classList.remove('good', 'warn', 'miss');
-    if (status === 'warn' || status === 'miss') pillEl.classList.add(status);
-  }
-
-  function render() {
-    const waterEl = document.getElementById('topbarWater');
-    if (!waterEl) return; // not injected yet
-
-    const w = getWaterProgress();
-    const countEl = document.getElementById('topbarWaterCount');
-    if (countEl) countEl.textContent = w.total ? w.done + '/' + w.total : '0/0';
-    setPillStatus(waterEl, classifyStatus(w.done, w.total));
-  }
-
-  // -------- Water +1 (works from any page) --------
-  function defaultWaterState() {
-    return {
-      unit: 'bottle', bottleMl: 500, glassMl: 250, weightUnit: 'kg',
-      profile: { weightKg: 75, age: 25, sex: 'm', activityHrsPerWeek: 5 },
-      caffeineMgPerDay: 200, substances: [], logs: {}
-    };
-  }
-
-  async function pushWaterMergedToSupabase(localWater) {
-    // Only do this when we're NOT on the health page — health page
-    // has its own sync that already detects the localStorage change.
-    if (window.location.pathname.endsWith('/health.html') ||
-        window.location.pathname.endsWith('health.html')) return;
-
-    if (!window.supabase || !TOPBAR_SUPABASE_URL || !TOPBAR_SUPABASE_KEY) return;
-    if (TOPBAR_SUPABASE_URL.indexOf('PASTE-') === 0) return;
-
-    try {
-      const supa = window.supabase.createClient(TOPBAR_SUPABASE_URL, TOPBAR_SUPABASE_KEY);
-      const { data } = await supa
-        .from('app_state').select('data').eq('key', 'health').maybeSingle();
-      const current = (data && data.data) || {};
-      const merged = Object.assign({}, current, { po_water_v1: localWater });
-      await supa.from('app_state').upsert(
-        { key: 'health', data: merged, updated_at: new Date().toISOString() },
-        { onConflict: 'key' }
-      );
-    } catch (e) { /* offline — local change will sync next time user visits health */ }
-  }
-
-  function addWater() {
-    let state = null;
-    try { state = JSON.parse(localStorage.getItem('po_water_v1')); } catch (e) {}
-    if (!state || typeof state !== 'object') state = defaultWaterState();
-    state.logs = state.logs || {};
-    const k = calendarDateKey();
-    state.logs[k] = (state.logs[k] || 0) + 1;
-    try { localStorage.setItem('po_water_v1', JSON.stringify(state)); } catch (e) {}
-    render();
-
-    const btn = document.getElementById('topbarWaterAdd');
-    if (btn) {
-      btn.classList.add('flash');
-      setTimeout(() => btn.classList.remove('flash'), 220);
-    }
-
-    pushWaterMergedToSupabase(state);
   }
 
   // -------- Mobile lockdown helpers --------
@@ -465,20 +288,8 @@ body.topbar-modal-open {
   // -------- Boot --------
   function boot() {
     injectStyleAndHTML();
-    const btn = document.getElementById('topbarWaterAdd');
-    if (btn) btn.addEventListener('click', (e) => { e.preventDefault(); addWater(); });
-    render();
     lockGestures();
     startModalLock();
-
-    // Re-render when localStorage changes from another tab/window OR when
-    // the page becomes visible (sync may have pulled in the background).
-    window.addEventListener('storage', render);
-    window.addEventListener('focus', render);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
-
-    // Periodic refresh so counts stay current after midnight rollover etc.
-    setInterval(render, 30 * 1000);
   }
 
   if (document.readyState === 'loading') {

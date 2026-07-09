@@ -11,18 +11,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="sync.js" defer></script>
 <script src="topbar.js" defer></script>
-<script src="tasks.js" defer></script>
-<script src="state.js" defer></script>
-<script src="decision-engine.js" defer></script>
 
 <style>
+/* ===== Shared design tokens (same as the rest of the dashboard) ===== */
 :root {
   --text-primary: #FAFAFA;
   --text-secondary: #B8B6B0;
   --text-tertiary: #76746E;
-  --success: #6BE3A4;
-  --warning: #F2C063;
-  --danger: #FF6B6B;
   --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -39,6 +34,7 @@ body {
   min-height: 100vh; position: relative; overflow-x: hidden;
   padding: max(28px, env(safe-area-inset-top)) 20px 60px;
 }
+/* Soft drifting glow + dot texture (matches the other pages). */
 body::before {
   content: ''; position: fixed; inset: 0;
   background:
@@ -54,16 +50,96 @@ body::after {
 }
 @keyframes drift { 0%{transform:translate3d(0,0,0)} 100%{transform:translate3d(-22px,14px,0)} }
 
-.page { max-width: 640px; margin: 0 auto; }
-
-.hub-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+.page { max-width: 1100px; margin: 0 auto; }
 .dash-title {
-  margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.025em;
+  margin: 0 0 18px; font-size: 28px; font-weight: 700; letter-spacing: -0.025em;
   background: linear-gradient(180deg, #FFFFFF 0%, #C7C4BC 120%);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; color: transparent;
 }
 @media (max-width: 480px) { .dash-title { font-size: 22px; } }
+
+/* ===== BENTO GRID ===== */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 168px;
+  grid-auto-flow: dense;
+  gap: 14px;
+}
+.tile {
+  --accent: #6BE3A4;                 /* each tile overrides this */
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+  padding: 20px;
+  border-radius: 18px;
+  text-decoration: none;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+/* The "its own style" bit — a faint accent glow per tile. */
+.tile::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle at 78% 18%,
+              color-mix(in srgb, var(--accent) 22%, transparent), transparent 55%);
+  opacity: 0.7; transition: opacity 0.18s ease;
+}
+.tile:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.55);
+}
+.tile:hover::before { opacity: 1; }
+
+/* Tile sizes */
+.tile.big  { grid-column: span 2; grid-row: span 2; }
+.tile.wide { grid-column: span 2; }
+
+/* Tile contents */
+.tile-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.tile-num {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.08em; color: var(--text-tertiary);
+}
+.tile-emoji {
+  font-size: 26px; line-height: 1;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+.tile-spacer { flex: 1; }
+.tile-title {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--text-primary); margin: 0 0 4px;
+}
+.tile.big .tile-title { font-size: 28px; }
+.tile-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tile-sub {
+  font-size: 13px; color: var(--text-tertiary);
+}
+.tile-arrow {
+  font-size: 18px; color: var(--accent);
+  transition: transform 0.18s ease; flex-shrink: 0;
+}
+.tile:hover .tile-arrow { transform: translateX(4px); }
+
+/* ===== Responsive: collapse the bento on small screens ===== */
+@media (max-width: 720px) {
+  .bento { grid-template-columns: repeat(2, 1fr); grid-auto-rows: 150px; }
+  .tile.big { grid-column: span 2; grid-row: span 1; }
+  .tile.big .tile-title { font-size: 22px; }
+}
+@media (max-width: 440px) {
+  body { padding: max(20px, env(safe-area-inset-top)) 14px 50px; }
+  .bento { grid-template-columns: 1fr; grid-auto-rows: 132px; }
+  .tile.big, .tile.wide { grid-column: span 1; }
+}
+
+/* ===== Header row ===== */
+.hub-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.hub-head .dash-title { margin: 0; }
 .icon-btn {
   width: 42px; height: 42px; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -75,209 +151,6 @@ body::after {
 .icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
 .icon-btn:active { transform: scale(0.94); }
 .icon-btn svg { width: 22px; height: 22px; }
-
-/* ===== Up Next card ===== */
-.next-card {
-  position: relative; overflow: hidden;
-  padding: 26px 24px;
-  border-radius: 20px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.07);
-  backdrop-filter: blur(24px) saturate(1.2);
-  -webkit-backdrop-filter: blur(24px) saturate(1.2);
-  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
-  margin-bottom: 16px;
-}
-.next-card::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(circle at 78% 0%, rgba(107,227,164,0.10), transparent 55%);
-}
-.next-eyebrow {
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--text-tertiary); margin-bottom: 10px;
-}
-
-/* ===== Productivity pill ===== */
-.prod-pill {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 6px 12px; margin-bottom: 14px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-}
-.prod-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #76746E; flex-shrink: 0; }
-.prod-pill.low .dot { background: #FF8A8A; box-shadow: 0 0 8px rgba(255,138,138,0.6); }
-.prod-pill.medium .dot { background: #F2C063; box-shadow: 0 0 8px rgba(242,192,99,0.6); }
-.prod-pill.high .dot { background: #6BE3A4; box-shadow: 0 0 8px rgba(107,227,164,0.6); }
-.prod-pill .factors { color: var(--text-tertiary); font-weight: 500; }
-.dtn-category {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--text-tertiary); margin-bottom: 8px;
-}
-.next-title {
-  font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
-  color: var(--text-primary); margin: 0 0 10px; line-height: 1.25;
-  min-height: 33px;
-}
-@media (max-width: 480px) { .next-title { font-size: 21px; } }
-.dtn-meta-row { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; }
-.dtn-duration {
-  font-family: var(--font-mono); font-size: 13px; font-weight: 600;
-  color: var(--text-secondary);
-}
-.dtn-confidence {
-  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
-  color: var(--success);
-  padding: 3px 9px; border-radius: 999px;
-  background: rgba(107,227,164,0.10); border: 1px solid rgba(107,227,164,0.25);
-}
-.dtn-why-label {
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--text-tertiary); margin-bottom: 8px;
-}
-.dtn-why-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.dtn-why-item {
-  display: flex; align-items: baseline; gap: 8px;
-  font-size: 13.5px; color: var(--text-secondary); line-height: 1.4;
-}
-.dtn-why-item::before { content: '•'; color: var(--success); flex-shrink: 0; }
-.dtn-next {
-  font-size: 12px; color: var(--text-tertiary);
-  padding-top: 14px; margin-top: 2px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-}
-
-.chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-  white-space: nowrap;
-}
-.chip.urgent { color: var(--danger); border-color: rgba(255,107,107,0.35); background: rgba(255,107,107,0.08); }
-.chip.soon { color: var(--warning); border-color: rgba(242,192,99,0.35); background: rgba(242,192,99,0.08); }
-
-.empty-hint { font-size: 14px; color: var(--text-tertiary); margin: 0 0 14px; }
-
-/* ===== Nutrition strip ===== */
-.nutrition-section { margin-top: 22px; }
-.nutrition-title {
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--text-tertiary); margin-bottom: 10px;
-}
-.nutrition-row { display: flex; flex-wrap: wrap; gap: 8px; }
-
-/* ===== Action buttons ===== */
-.actions { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
-.btn-complete {
-  width: 100%; padding: 17px; border: 0; border-radius: 16px;
-  background: linear-gradient(180deg, #FFFFFF 0%, #E8E5DD 100%);
-  color: #0A0A0B; font-family: inherit; font-size: 16px; font-weight: 700;
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 22px rgba(0,0,0,0.3);
-  transition: transform 0.1s, filter 0.15s;
-}
-.btn-complete:hover { filter: brightness(1.05); }
-.btn-complete:active { transform: translateY(1px); }
-.btn-complete:disabled { opacity: 0.35; cursor: not-allowed; filter: none; }
-.actions-row { display: flex; gap: 10px; }
-.btn-secondary {
-  flex: 1; padding: 14px; border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(255,255,255,0.04); color: var(--text-primary);
-  font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-.btn-secondary:hover { background: rgba(255,255,255,0.08); }
-.btn-secondary:disabled { opacity: 0.35; cursor: not-allowed; }
-
-.remaining-note { text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 16px; }
-
-/* ===== Add Task modal ===== */
-.modal-bg {
-  position: fixed; inset: 0; z-index: 120; display: none;
-  align-items: center; justify-content: center; padding: 20px;
-  background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-}
-.modal-bg.show { display: flex; }
-.modal {
-  width: 100%; max-width: 440px; max-height: 88vh; overflow-y: auto;
-  background: #0e0e10; border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 18px; padding: 22px; box-shadow: 0 24px 70px rgba(0,0,0,0.6);
-}
-.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-.modal-title { font-size: 18px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
-.modal-close { border: 0; background: transparent; color: var(--text-tertiary); font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px; }
-.modal-close:hover { color: var(--text-primary); }
-.field { margin-bottom: 14px; }
-.field-label { font-size: 11px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 7px; display: block; }
-.set-input {
-  width: 100%; padding: 11px 13px;
-  border: 1px solid rgba(255,255,255,0.08); border-radius: 11px;
-  background: rgba(0,0,0,0.3); color: var(--text-primary);
-  font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.2s;
-}
-.set-input:focus { border-color: rgba(255,255,255,0.28); }
-.set-textarea {
-  width: 100%; min-height: 100px; resize: vertical;
-  padding: 11px 13px;
-  border: 1px solid rgba(255,255,255,0.08); border-radius: 11px;
-  background: rgba(0,0,0,0.3); color: var(--text-primary);
-  font-family: inherit; font-size: 13.5px; line-height: 1.5; outline: none; transition: border-color 0.2s;
-}
-.set-textarea:focus { border-color: rgba(255,255,255,0.28); }
-.set-textarea::placeholder { color: var(--text-tertiary); }
-.seg { display: flex; border: 1px solid rgba(255,255,255,0.10); border-radius: 11px; overflow: hidden; }
-.seg button { flex: 1; border: 0; background: transparent; color: var(--text-tertiary); font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px 8px; cursor: pointer; transition: background 0.15s, color 0.15s; }
-.seg button.on { background: rgba(255,255,255,0.12); color: var(--text-primary); }
-.set-save {
-  width: 100%; margin-top: 6px; padding: 13px; border: 0; border-radius: 12px;
-  background: linear-gradient(180deg,#FFFFFF,#E8E5DD); color: #0A0A0B;
-  font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 22px rgba(0,0,0,0.25);
-  transition: filter 0.15s, transform 0.1s;
-}
-.set-save:hover { filter: brightness(1.05); }
-.set-save:active { transform: translateY(1px); }
-.set-status { text-align: center; font-size: 12px; color: var(--success); min-height: 16px; margin-top: 8px; }
-.fb-skip-link { display: block; text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 12px; cursor: pointer; }
-.fb-skip-link:hover { color: var(--text-primary); }
-.field-row { display: flex; gap: 8px; align-items: center; }
-.section-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 20px 0 14px; }
-.whoop-box { margin-top: 8px; padding: 16px; border-radius: 14px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.06); }
-.whoop-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.whoop-status { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.whoop-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #76746E; }
-.whoop-status.on .dot { background: #6BE3A4; box-shadow: 0 0 8px rgba(107,227,164,0.7); }
-.whoop-sync { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); text-align: right; }
-.whoop-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 14px; }
-.whoop-stat { text-align: center; }
-.whoop-stat .v { font-size: 20px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1; }
-.whoop-stat .l { font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); margin-top: 5px; }
-.whoop-btn { width: 100%; margin-top: 14px; padding: 11px; border: 1px solid rgba(255,255,255,0.12); border-radius: 11px; background: transparent; color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; transition: background 0.15s, color 0.15s; }
-.whoop-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
-.more-tools-link { display: block; text-align: center; margin-top: 18px; font-size: 12px; color: var(--text-tertiary); text-decoration: none; }
-.more-tools-link:hover { color: var(--text-primary); }
-
-/* ===== Today's Calendar (on the decision screen) ===== */
-.cal-section { margin-top: 22px; }
-.cal-title {
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--text-tertiary); margin-bottom: 10px;
-}
-.cal-row {
-  display: flex; align-items: baseline; gap: 10px;
-  padding: 10px 4px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-  font-size: 13px;
-}
-.cal-row:last-child { border-bottom: none; }
-.cal-time { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); flex-shrink: 0; width: 76px; }
-.cal-event-title { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -285,747 +158,95 @@ body::after {
 
   <div class="hub-head">
     <h1 class="dash-title">Deni's Dashboard</h1>
-    <div style="display:flex;gap:8px;">
-      <a class="icon-btn" href="manage.html" aria-label="Manage tasks">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/>
-          <path d="M4.5 6l.75.75L6.5 5.25"/><path d="M4.5 12l.75.75L6.5 11.25"/><path d="M4.5 18l.75.75L6.5 17.25"/>
-        </svg>
-      </a>
-      <button class="icon-btn" id="settingsOpen" type="button" aria-label="Settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-        </svg>
-      </button>
-    </div>
   </div>
 
-  <div class="prod-pill" id="prodPill" style="display:none">
-    <span class="dot"></span>
-    <span id="prodLabel">—</span>
-    <span class="factors" id="prodFactors"></span>
-  </div>
+  <div class="bento">
 
-  <div class="next-card">
-    <div class="next-eyebrow" id="nextEyebrow">Do This Now</div>
-    <div class="dtn-category" id="dtnCategory" style="display:none"></div>
-    <h2 class="next-title" id="nextTitle">Loading…</h2>
-    <div class="dtn-meta-row">
-      <div class="dtn-duration" id="dtnDuration"></div>
-      <div class="dtn-confidence" id="dtnConfidence" style="display:none"></div>
-    </div>
-    <div id="dtnWhyBlock" style="display:none">
-      <div class="dtn-why-label">Why</div>
-      <ul class="dtn-why-list" id="dtnWhyList"></ul>
-    </div>
-    <div id="dtnBenefitBlock" style="display:none">
-      <div class="dtn-why-label">Expected Benefit</div>
-      <ul class="dtn-why-list" id="dtnBenefitList"></ul>
-    </div>
-    <div class="dtn-next" id="dtnNext" style="display:none"></div>
-  </div>
-
-  <div class="actions">
-    <button class="btn-complete" id="btnComplete" type="button">Complete</button>
-    <div class="actions-row">
-      <button class="btn-secondary" id="btnDelay" type="button">Delay 15 Minutes</button>
-      <button class="btn-secondary" id="btnSkip" type="button">Skip</button>
-      <button class="btn-secondary" id="btnReplan" type="button">Replan</button>
-    </div>
-  </div>
-
-  <div class="remaining-note" id="remainingNote"></div>
-
-  <div class="nutrition-section" id="nutritionSection" style="display:none">
-    <div class="nutrition-title">Nutrition Today</div>
-    <div class="nutrition-row" id="nutritionRow"></div>
-  </div>
-
-  <div class="cal-section" id="calSection" style="display:none">
-    <div class="cal-title">Today's Calendar</div>
-    <div id="calList"></div>
-  </div>
-
-</div>
-
-<!-- ===== Settings modal ===== -->
-<div class="modal-bg" id="settingsBg">
-  <div class="modal" role="dialog" aria-label="Settings">
-    <div class="modal-head">
-      <span class="modal-title">Settings</span>
-      <button class="modal-close" id="settingsClose" type="button" aria-label="Close">×</button>
-    </div>
-
-    <div class="field">
-      <label class="field-label">Life Context</label>
-      <textarea class="set-textarea" id="lifeContext" placeholder="A few sentences about your actual goals and priorities right now — e.g. current classes and which ones matter most, your career target, what your debate team is working toward, your research project's deadline, financial goals. Write it once, update it when things change."></textarea>
-      <div style="font-size:11px;color:var(--text-tertiary);margin-top:7px;line-height:1.5;">
-        This is what makes task scoring meaningful instead of generic — every classification reads this first.
+    <!-- Big tile -->
+    <a class="tile big" href="today.html" style="--accent:#6BE3A4">
+      <div class="tile-top">
+        <span class="tile-num">·01</span>
+        <span class="tile-emoji">🏠</span>
       </div>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <label class="field-label">Google Calendar</label>
-    <div class="whoop-box" id="gcalBox">
-      <div class="whoop-row">
-        <span class="whoop-status" id="gcalStatus"><span class="dot"></span><span id="gcalStatusText">Not connected</span></span>
+      <div class="tile-spacer"></div>
+      <h2 class="tile-title">Main</h2>
+      <div class="tile-foot">
+        <span class="tile-sub">What to do right now</span>
+        <span class="tile-arrow">→</span>
       </div>
-      <button class="whoop-btn" id="gcalAction" type="button">Connect Google Calendar</button>
-    </div>
+    </a>
 
-    <div class="section-divider"></div>
-
-    <label class="field-label">Apple Health</label>
-    <div class="whoop-box">
-      <div class="whoop-row">
-        <span class="whoop-status" id="ahStatus"><span class="dot"></span><span id="ahStatusText">Not set up yet</span></span>
-        <span class="whoop-sync" id="ahSync"></span>
+    <!-- Wide tile -->
+    <a class="tile wide" href="gym.html" style="--accent:#7DD3FC">
+      <div class="tile-top">
+        <span class="tile-num">·02</span>
+        <span class="tile-emoji">💪</span>
       </div>
-      <div class="whoop-stats" id="ahStats" style="display:none">
-        <div class="whoop-stat"><div class="v" id="ahSleep">—</div><div class="l">Sleep</div></div>
-        <div class="whoop-stat"><div class="v" id="ahSteps">—</div><div class="l">Steps</div></div>
-        <div class="whoop-stat"><div class="v" id="ahRhr">—</div><div class="l">Rest HR</div></div>
+      <div class="tile-spacer"></div>
+      <h2 class="tile-title">Fitness</h2>
+      <div class="tile-foot">
+        <span class="tile-sub">Workouts, splits, sessions</span>
+        <span class="tile-arrow">→</span>
       </div>
-      <div style="font-size:11px;color:var(--text-tertiary);margin-top:12px;line-height:1.5;">
-        Pushed automatically from the Health Auto Export app — no connect button here. See SETUP.md for setup.
+    </a>
+
+    <!-- Small tile -->
+    <a class="tile" href="health.html" style="--accent:#A7F3D0">
+      <div class="tile-top">
+        <span class="tile-num">·03</span>
+        <span class="tile-emoji">💊</span>
       </div>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <label class="field-label">WHOOP</label>
-    <div class="whoop-box">
-      <div class="whoop-row">
-        <span class="whoop-status" id="whStatus"><span class="dot"></span><span id="whStatusText">Not connected</span></span>
-        <span class="whoop-sync" id="whSync"></span>
+      <div class="tile-spacer"></div>
+      <h2 class="tile-title">Health</h2>
+      <div class="tile-foot">
+        <span class="tile-sub">Supplements & vitals</span>
+        <span class="tile-arrow">→</span>
       </div>
-      <div class="whoop-stats" id="whStats" style="display:none">
-        <div class="whoop-stat"><div class="v" id="whRec">—</div><div class="l">Recovery</div></div>
-        <div class="whoop-stat"><div class="v" id="whSleep">—</div><div class="l">Sleep</div></div>
-        <div class="whoop-stat"><div class="v" id="whRhr">—</div><div class="l">Rest HR</div></div>
+    </a>
+
+    <!-- Wide tile -->
+    <a class="tile wide" href="finance.html" style="--accent:#F2C063">
+      <div class="tile-top">
+        <span class="tile-num">·04</span>
+        <span class="tile-emoji">📊</span>
       </div>
-      <button class="whoop-btn" id="whAction" type="button">Sync now</button>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <div class="field">
-      <label class="field-label">Height</label>
-      <div class="field-row">
-        <input class="set-input" id="heightA" type="number" min="0" inputmode="decimal" placeholder="cm">
-        <input class="set-input" id="heightB" type="number" min="0" inputmode="decimal" placeholder="in" style="display:none">
-        <div class="seg" id="heightUnitSeg">
-          <button type="button" data-u="cm" class="on">cm</button>
-          <button type="button" data-u="ft">ft/in</button>
-        </div>
+      <div class="tile-spacer"></div>
+      <h2 class="tile-title">Finance</h2>
+      <div class="tile-foot">
+        <span class="tile-sub">Net worth & spending</span>
+        <span class="tile-arrow">→</span>
       </div>
-    </div>
+    </a>
 
-    <div class="field">
-      <label class="field-label">Weight</label>
-      <div class="field-row">
-        <input class="set-input" id="weight" type="number" min="0" inputmode="decimal" placeholder="weight">
-        <div class="seg" id="weightUnitSeg">
-          <button type="button" data-u="kg" class="on">kg</button>
-          <button type="button" data-u="lb">lb</button>
-        </div>
+    <!-- Small tile -->
+    <a class="tile" href="caffeine.html" style="--accent:#C9A36B">
+      <div class="tile-top">
+        <span class="tile-num">·05</span>
+        <span class="tile-emoji">☕</span>
       </div>
-    </div>
-
-    <div class="field">
-      <label class="field-label">Age</label>
-      <input class="set-input" id="age" type="number" min="0" inputmode="numeric" placeholder="years">
-    </div>
-
-    <div class="field">
-      <label class="field-label">Sex</label>
-      <div class="seg" id="sexSeg" style="width:100%;display:flex">
-        <button type="button" data-s="m" style="flex:1">Male</button>
-        <button type="button" data-s="f" style="flex:1">Female</button>
+      <div class="tile-spacer"></div>
+      <h2 class="tile-title">Caffeine</h2>
+      <div class="tile-foot">
+        <span class="tile-sub">Intake & timing</span>
+        <span class="tile-arrow">→</span>
       </div>
-    </div>
+    </a>
 
-    <div class="field">
-      <label class="field-label">Active hours / week</label>
-      <input class="set-input" id="activity" type="number" min="0" inputmode="decimal" placeholder="e.g. 5">
-    </div>
+    <!-- Wide tile -->
+    <a class="tile wide" href="nova-lite.html" style="--accent:#A78BFA">
+      <div class="tile-top">
+        <span class="tile-num">·06</span>
+        <span class="tile-emoji">🧠</span>
+      </div>
+      <div class="tile-spacer"></div>
+      <h2 class="tile-title">Nova</h2>
+      <div class="tile-foot">
+        <span class="tile-sub">Your AI mentor</span>
+        <span class="tile-arrow">→</span>
+      </div>
+    </a>
 
-    <div class="field">
-      <label class="field-label">Daily calorie target (optional)</label>
-      <input class="set-input" id="calorieTarget" type="number" min="0" inputmode="numeric" placeholder="auto-estimated if left blank">
-    </div>
-
-    <button class="set-save" id="settingsSave" type="button">Save</button>
-    <div class="set-status" id="settingsStatus"></div>
-
-    <a class="more-tools-link" href="hub.html">More tools (Fitness, Health, Water, Finance, Caffeine, Nova) →</a>
   </div>
 </div>
-
-<!-- ===== Completion feedback modal ===== -->
-<div class="modal-bg" id="feedbackBg">
-  <div class="modal" role="dialog" aria-label="Task feedback">
-    <div class="modal-head">
-      <span class="modal-title">How did it go?</span>
-      <button class="modal-close" id="feedbackClose" type="button" aria-label="Close">&times;</button>
-    </div>
-    <div class="field">
-      <label class="field-label">Actual minutes</label>
-      <input class="set-input" id="fbMinutes" type="number" min="1" inputmode="numeric">
-    </div>
-    <div class="field">
-      <label class="field-label">How did it feel?</label>
-      <div class="seg" id="fbFeelingSeg">
-        <button type="button" data-f="great">Great</button>
-        <button type="button" data-f="fine">Fine</button>
-        <button type="button" data-f="neutral">Neutral</button>
-        <button type="button" data-f="drained">Drained</button>
-      </div>
-    </div>
-    <div class="field">
-      <label class="field-label">Completion</label>
-      <div class="seg" id="fbDoneSeg">
-        <button type="button" data-d="full" class="on">Fully done</button>
-        <button type="button" data-d="subtask">Part of bigger project</button>
-      </div>
-    </div>
-    <button class="set-save" id="fbSubmit" type="button">Save &amp; Complete</button>
-    <span class="fb-skip-link" id="fbSkip">Skip — just mark complete</span>
-  </div>
-</div>
-
-<script>
-(function () {
-  'use strict';
-  const $ = (id) => document.getElementById(id);
-
-  const CATEGORY_EMOJI = { career: '💼', school: '📚', debate: '🎤', glp1_research: '🧪', finance: '💰', personal: '🌱', extracurricular: '🎯', health: '💊' };
-  const CATEGORY_LABEL = { career: 'career', school: 'school', debate: 'debate', glp1_research: 'GLP-1 research', finance: 'finance', personal: 'personal', extracurricular: 'extracurricular', health: 'health' };
-
-  function whenTasksReady(fn) {
-    if (window.DecisionEngine) { fn(); return; }
-    document.addEventListener('DOMContentLoaded', () => {
-      if (window.DecisionEngine) fn();
-      else setTimeout(() => window.DecisionEngine && fn(), 50);
-    });
-  }
-
-  function renderProductivityPill(productivity) {
-    const pill = $('prodPill');
-    if (!productivity || productivity.factors.length === 0) {
-      pill.style.display = 'none';
-      return;
-    }
-    pill.className = 'prod-pill ' + productivity.level;
-    pill.style.display = '';
-    $('prodLabel').textContent = productivity.level.charAt(0).toUpperCase() + productivity.level.slice(1) + ' energy';
-    $('prodFactors').textContent = '· ' + productivity.factors.slice(0, 2).join(', ');
-  }
-
-  function formatEventTime(iso, allDay) {
-    if (allDay) return 'All day';
-    const d = new Date(iso);
-    let h = d.getHours();
-    const m = d.getMinutes();
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12; if (h === 0) h = 12;
-    return h + ':' + String(m).padStart(2, '0') + ' ' + ampm;
-  }
-
-  function renderCalendarList(cal, now) {
-    const section = $('calSection');
-    const list = $('calList');
-    if (!cal || !cal.connected || !cal.events || cal.events.length === 0) {
-      section.style.display = 'none';
-      return;
-    }
-    const upcoming = cal.events
-      .filter(ev => ev.allDay || new Date(ev.end).getTime() > now)
-      .slice(0, 5);
-    if (upcoming.length === 0) {
-      section.style.display = 'none';
-      return;
-    }
-    list.innerHTML = upcoming.map(ev =>
-      '<div class="cal-row"><span class="cal-time">' + formatEventTime(ev.start, ev.allDay) +
-      '</span><span class="cal-event-title">' + ev.title.replace(/</g, '&lt;') + '</span></div>'
-    ).join('');
-    section.style.display = '';
-  }
-
-  function renderNutritionStrip(nutrition) {
-    const section = $('nutritionSection');
-    const row = $('nutritionRow');
-    if (!nutrition || !nutrition.connected) {
-      section.style.display = 'none';
-      return;
-    }
-    const chips = [];
-    if (nutrition.caloriesConsumed != null) {
-      const label = nutrition.caloriesTarget != null
-        ? nutrition.caloriesConsumed + ' / ' + nutrition.caloriesTarget + ' kcal'
-        : nutrition.caloriesConsumed + ' kcal';
-      chips.push('<span class="chip">' + label + '</span>');
-    }
-    if (nutrition.caloriesRemaining != null) chips.push('<span class="chip">' + nutrition.caloriesRemaining + ' kcal left</span>');
-    if (nutrition.proteinG != null) chips.push('<span class="chip">' + nutrition.proteinG + 'g protein</span>');
-    if (nutrition.carbsG != null) chips.push('<span class="chip">' + nutrition.carbsG + 'g carbs</span>');
-    if (nutrition.fatG != null) chips.push('<span class="chip">' + nutrition.fatG + 'g fat</span>');
-    if (nutrition.fiberG != null) chips.push('<span class="chip">' + nutrition.fiberG + 'g fiber</span>');
-    if (chips.length === 0) { section.style.display = 'none'; return; }
-    row.innerHTML = chips.join('');
-    section.style.display = '';
-  }
-
-  async function render() {
-    if (!window.DecisionEngine) return;
-    const result = await window.DecisionEngine.decide();
-    const { task, durationMin, reasons, confidence, expectedBenefit, afterThis, state } = result;
-
-    renderProductivityPill(state.productivity);
-    renderCalendarList(state.calendar, state.now);
-    renderNutritionStrip(state.nutrition);
-
-    const categoryEl = $('dtnCategory');
-    const titleEl = $('nextTitle');
-    const durationEl = $('dtnDuration');
-    const confidenceEl = $('dtnConfidence');
-    const whyBlock = $('dtnWhyBlock');
-    const whyList = $('dtnWhyList');
-    const benefitBlock = $('dtnBenefitBlock');
-    const benefitList = $('dtnBenefitList');
-    const nextEl = $('dtnNext');
-    const completeBtn = $('btnComplete');
-    const skipBtn = $('btnSkip');
-    const delayBtn = $('btnDelay');
-
-    if (!task) {
-      categoryEl.style.display = 'none';
-      titleEl.textContent = 'Nothing on your list';
-      durationEl.textContent = '';
-      confidenceEl.style.display = 'none';
-      whyBlock.style.display = 'none';
-      benefitBlock.style.display = 'none';
-      nextEl.style.display = 'none';
-      completeBtn.disabled = true;
-      skipBtn.disabled = true;
-      delayBtn.disabled = true;
-    } else {
-      categoryEl.style.display = '';
-      categoryEl.textContent = (CATEGORY_EMOJI[task.lifeDomain] || '') + ' ' + (CATEGORY_LABEL[task.lifeDomain] || task.lifeDomain);
-      titleEl.textContent = task.title;
-      durationEl.textContent = 'Duration: ' + durationMin + ' minutes';
-      if (confidence != null) {
-        confidenceEl.style.display = '';
-        confidenceEl.textContent = 'Confidence: ' + confidence + '%';
-      } else {
-        confidenceEl.style.display = 'none';
-      }
-      whyBlock.style.display = reasons.length ? '' : 'none';
-      whyList.innerHTML = reasons.map(r => '<li class="dtn-why-item">' + r.replace(/</g, '&lt;') + '</li>').join('');
-      if (expectedBenefit && expectedBenefit.length) {
-        benefitBlock.style.display = '';
-        benefitList.innerHTML = expectedBenefit.map(b => '<li class="dtn-why-item">' + b.replace(/</g, '&lt;') + '</li>').join('');
-      } else {
-        benefitBlock.style.display = 'none';
-      }
-      if (afterThis) {
-        nextEl.style.display = '';
-        nextEl.textContent = afterThis.type === 'event'
-          ? 'After this: ' + afterThis.title + ' in ' + afterThis.minutesUntil + ' min'
-          : 'Next up: ' + afterThis.title + ' (~' + afterThis.durationMin + ' min)';
-      } else {
-        nextEl.style.display = 'none';
-      }
-      completeBtn.disabled = false;
-      skipBtn.disabled = false;
-      delayBtn.disabled = false;
-    }
-
-    const remaining = state.tasks.filter(t => !t.done).length;
-    $('remainingNote').textContent = remaining === 0 ? '' :
-      (remaining === 1 ? '1 task waiting' : remaining + ' tasks waiting');
-
-    completeBtn.dataset.taskId = task ? task.id : '';
-    skipBtn.dataset.taskId = task ? task.id : '';
-    delayBtn.dataset.taskId = task ? task.id : '';
-  }
-
-  // ===== Completion feedback modal =====
-  let fbTaskId = null;
-  let fbFeeling = null;
-  let fbDone = 'full';
-
-  function openFeedbackModal(task) {
-    fbTaskId = task.id;
-    fbFeeling = null;
-    fbDone = 'full';
-    $('fbMinutes').value = task.estimatedMinutes || '';
-    document.querySelectorAll('#fbFeelingSeg button').forEach(b => b.classList.remove('on'));
-    document.querySelectorAll('#fbDoneSeg button').forEach(b => b.classList.toggle('on', b.dataset.d === 'full'));
-    $('feedbackBg').classList.add('show');
-  }
-  function closeFeedbackModal() {
-    $('feedbackBg').classList.remove('show');
-    fbTaskId = null;
-  }
-  function wireFeedbackModal() {
-    document.querySelectorAll('#fbFeelingSeg button').forEach(b => {
-      b.addEventListener('click', () => {
-        fbFeeling = b.dataset.f;
-        document.querySelectorAll('#fbFeelingSeg button').forEach(x => x.classList.toggle('on', x === b));
-      });
-    });
-    document.querySelectorAll('#fbDoneSeg button').forEach(b => {
-      b.addEventListener('click', () => {
-        fbDone = b.dataset.d;
-        document.querySelectorAll('#fbDoneSeg button').forEach(x => x.classList.toggle('on', x === b));
-      });
-    });
-    $('feedbackClose').addEventListener('click', () => { closeFeedbackModal(); });
-    $('fbSkip').addEventListener('click', () => {
-      const id = fbTaskId;
-      closeFeedbackModal();
-      if (id) { window.Tasks.completeTask(id); render(); }
-    });
-    $('fbSubmit').addEventListener('click', () => {
-      const id = fbTaskId;
-      const minutes = parseInt($('fbMinutes').value, 10);
-      const feedback = {
-        actualMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : null,
-        feeling: fbFeeling,
-        wasSubtask: fbDone === 'subtask',
-      };
-      closeFeedbackModal();
-      if (id) { window.Tasks.completeTask(id, feedback); render(); }
-    });
-  }
-
-  function wireActions() {
-    $('btnComplete').addEventListener('click', function () {
-      const id = this.dataset.taskId;
-      if (!id) return;
-      const task = window.Tasks.getTasks().find(t => t.id === id);
-      if (!task) return;
-      openFeedbackModal(task);
-    });
-    $('btnSkip').addEventListener('click', function () {
-      const id = this.dataset.taskId;
-      if (!id) return;
-      window.Tasks.skipTask(id, 60);
-      render();
-    });
-    $('btnDelay').addEventListener('click', function () {
-      const id = this.dataset.taskId;
-      if (!id) return;
-      window.Tasks.skipTask(id, 15);
-      render();
-    });
-    $('btnReplan').addEventListener('click', function () {
-      render();
-    });
-  }
-
-  whenTasksReady(function () {
-    wireActions();
-    wireFeedbackModal();
-    render();
-
-    window.addEventListener('tasks-changed', render);
-    window.addEventListener('storage', render);
-
-    if (typeof initCloudSync === 'function') {
-      initCloudSync({
-        appKey: 'tasks',
-        syncedKeys: ['tasks_v1'],
-        onApplied: render,
-      });
-      // health_metrics_v1 is written server-side by api/health-import.js
-      // (never by this page), so this call is read-only in practice — it
-      // just pulls down whatever Health Auto Export's automation last
-      // posted, and Supabase's realtime subscription (same mechanism as
-      // every other synced key) pushes updates within ~1s of a new import.
-      initCloudSync({
-        appKey: 'health_metrics',
-        syncedKeys: ['health_metrics_v1'],
-        onApplied: render,
-      });
-      // Small, rarely-changing — its own sync channel so it doesn't ride
-      // along with every task edit.
-      initCloudSync({
-        appKey: 'life_context',
-        syncedKeys: ['life_context_v1'],
-      });
-    }
-
-    // Recompute urgency chips / ranking as time passes.
-    setInterval(render, 60 * 1000);
-  });
-})();
-</script>
-
-<script>
-(function () {
-  'use strict';
-  const $ = (id) => document.getElementById(id);
-  const WATER_KEY = 'po_water_v1';
-  const WHOOP_KEY = 'whoop_tokens_v1';
-  const SYNC_KEY  = 'whoop_last_sync';
-  const GCAL_KEY  = 'gcal_tokens_v1';
-
-  function loadJSON(k, f) { try { return JSON.parse(localStorage.getItem(k)) || f; } catch (e) { return f; } }
-  function saveJSON(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
-
-  /* ---------- Google Calendar OAuth redirect handling ---------- */
-  // google-callback.js redirects here (/index.html#google_access=...) —
-  // parse it immediately, not just when the settings modal happens to be
-  // open, so the connect flow completes even if the user never reopens it.
-  if (location.hash && location.hash.indexOf('google_access') !== -1) {
-    const h = new URLSearchParams(location.hash.slice(1));
-    const access = h.get('google_access'), refresh = h.get('google_refresh');
-    const expires = Number(h.get('google_expires')) || Date.now() + 3500e3;
-    if (access) {
-      saveJSON(GCAL_KEY, { access, refresh, expires });
-      history.replaceState(null, '', location.pathname + location.search);
-    }
-  }
-
-  // Mirror of topbar.js defaultWaterState so we never clobber the water tracker.
-  function defaultWater() {
-    return { unit:'bottle', bottleMl:500, glassMl:250, weightUnit:'kg',
-      profile:{ weightKg:75, age:25, sex:'m', activityHrsPerWeek:5 },
-      caffeineMgPerDay:200, substances:[], logs:{} };
-  }
-
-  /* ---------- unit state ---------- */
-  let heightUnit = 'cm';   // 'cm' | 'ft'
-  let weightUnit = 'kg';   // 'kg' | 'lb'
-  let sex = 'm';
-
-  function setHeightUnit(u) {
-    heightUnit = u;
-    $('heightUnitSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
-    const a = $('heightA'), b = $('heightB');
-    if (u === 'cm') { a.placeholder = 'cm'; b.style.display = 'none'; }
-    else { a.placeholder = 'ft'; b.placeholder = 'in'; b.style.display = ''; }
-  }
-  function setWeightUnit(u) {
-    weightUnit = u;
-    $('weightUnitSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
-  }
-  function setSex(s) {
-    sex = s;
-    $('sexSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.s === s));
-  }
-
-  function getHeightCm() {
-    if (heightUnit === 'cm') { const v = parseFloat($('heightA').value); return v > 0 ? v : null; }
-    const ft = parseFloat($('heightA').value) || 0;
-    const inch = parseFloat($('heightB').value) || 0;
-    const cm = ft * 30.48 + inch * 2.54;
-    return cm > 0 ? Math.round(cm) : null;
-  }
-  function fillHeight(cm) {
-    if (!cm) { $('heightA').value = ''; $('heightB').value = ''; return; }
-    if (heightUnit === 'cm') { $('heightA').value = Math.round(cm); }
-    else { const totalIn = cm / 2.54; $('heightA').value = Math.floor(totalIn / 12); $('heightB').value = Math.round(totalIn % 12); }
-  }
-
-  /* ---------- load existing profile into the form ---------- */
-  function populate() {
-    const w = loadJSON(WATER_KEY, defaultWater());
-    const p = w.profile || {};
-    setWeightUnit(w.weightUnit === 'lb' ? 'lb' : 'kg');
-    setHeightUnit(p.heightUnit === 'ft' ? 'ft' : 'cm');
-    setSex(p.sex === 'f' ? 'f' : 'm');
-    fillHeight(p.heightCm || null);
-    if (p.weightKg) $('weight').value = weightUnit === 'lb' ? Math.round(p.weightKg * 2.20462) : Math.round(p.weightKg);
-    else $('weight').value = '';
-    $('age').value = p.age || '';
-    $('activity').value = (p.activityHrsPerWeek != null ? p.activityHrsPerWeek : '');
-    $('calorieTarget').value = (p.calorieTarget != null ? p.calorieTarget : '');
-    $('lifeContext').value = loadJSON('life_context_v1', '') || '';
-  }
-
-  /* ---------- save back into po_water_v1 (merge, never overwrite logs) ---------- */
-  function save() {
-    const w = loadJSON(WATER_KEY, defaultWater());
-    w.profile = w.profile || {};
-    const cm = getHeightCm();
-    if (cm) { w.profile.heightCm = cm; w.profile.heightUnit = heightUnit; }
-    const wv = parseFloat($('weight').value);
-    if (wv > 0) { w.profile.weightKg = weightUnit === 'lb' ? +(wv / 2.20462).toFixed(1) : wv; w.weightUnit = weightUnit; }
-    const age = parseInt($('age').value, 10); if (age > 0) w.profile.age = age;
-    w.profile.sex = sex;
-    const act = parseFloat($('activity').value); if (act >= 0 && !isNaN(act)) w.profile.activityHrsPerWeek = act;
-    const calTarget = parseInt($('calorieTarget').value, 10);
-    w.profile.calorieTarget = (calTarget > 0 && !isNaN(calTarget)) ? calTarget : null;
-    saveJSON(WATER_KEY, w);
-    saveJSON('life_context_v1', $('lifeContext').value.trim());
-    const s = $('settingsStatus'); s.textContent = 'Saved ✓';
-    setTimeout(() => { s.textContent = ''; }, 1800);
-  }
-
-  /* ---------- Google Calendar connect / disconnect ---------- */
-  function renderGcal() {
-    const t = loadJSON(GCAL_KEY, null);
-    const statusEl = $('gcalStatus'), txt = $('gcalStatusText'), action = $('gcalAction');
-    if (!t || !t.access) {
-      statusEl.classList.remove('on'); txt.textContent = 'Not connected';
-      action.textContent = 'Connect Google Calendar';
-    } else {
-      statusEl.classList.add('on'); txt.textContent = 'Connected';
-      action.textContent = 'Disconnect';
-    }
-  }
-  $('gcalAction').addEventListener('click', () => {
-    const t = loadJSON(GCAL_KEY, null);
-    if (t && t.access) {
-      try { localStorage.removeItem(GCAL_KEY); } catch (e) {}
-      renderGcal();
-      window.dispatchEvent(new CustomEvent('tasks-changed'));
-      return;
-    }
-    const clientId = window.DASH_GOOGLE_CLIENT_ID || '';
-    if (!clientId) {
-      alert("Google Calendar isn't configured yet — set GOOGLE_CLIENT_ID in Vercel (see SETUP.md).");
-      return;
-    }
-    // Fixed, not window.location.origin — must exactly match the single
-    // "Authorized redirect URI" registered in Google Cloud Console, or
-    // Google returns redirect_uri_mismatch. Breaks on preview/deployment
-    // URLs otherwise, since only the production domain is registered.
-    const redirect = 'https://monica-zeta-blue.vercel.app/api/google-callback';
-    const url = 'https://accounts.google.com/o/oauth2/v2/auth'
-      + '?client_id='     + encodeURIComponent(clientId)
-      + '&redirect_uri='  + encodeURIComponent(redirect)
-      + '&response_type=code'
-      + '&scope='         + encodeURIComponent('https://www.googleapis.com/auth/calendar.readonly')
-      + '&access_type=offline'
-      + '&prompt=consent'
-      + '&state='         + Math.random().toString(36).slice(2);
-    location.href = url;
-  });
-
-  /* ---------- Apple Health status (read-only — pushed by the webhook) ---------- */
-  function relTimeAH(ts) {
-    if (!ts) return 'never';
-    const s = Math.floor((Date.now() - ts) / 1000);
-    if (s < 60) return 'just now';
-    if (s < 3600) return Math.floor(s / 60) + ' min ago';
-    if (s < 86400) return Math.floor(s / 3600) + ' h ago';
-    return Math.floor(s / 86400) + ' d ago';
-  }
-  function renderAppleHealth() {
-    const h = loadJSON('health_metrics_v1', null);
-    const statusEl = $('ahStatus'), txt = $('ahStatusText'), syncEl = $('ahSync');
-    if (!h) {
-      statusEl.classList.remove('on'); txt.textContent = 'Not set up yet';
-      syncEl.textContent = ''; $('ahStats').style.display = 'none';
-      return;
-    }
-    statusEl.classList.add('on'); txt.textContent = 'Syncing';
-    syncEl.textContent = 'Last synced ' + relTimeAH(h.updatedAt);
-    $('ahStats').style.display = '';
-    $('ahSleep').textContent = h.sleepHours != null ? h.sleepHours + 'h' : '—';
-    $('ahSteps').textContent = h.steps != null ? h.steps : '—';
-    $('ahRhr').textContent   = h.restingHR != null ? h.restingHR : '—';
-  }
-
-  /* ---------- open / close ---------- */
-  function open() { populate(); renderWhoop(); renderGcal(); renderAppleHealth(); $('settingsBg').classList.add('show'); syncWhoop(); }
-  function close() { $('settingsBg').classList.remove('show'); }
-  $('settingsOpen').addEventListener('click', open);
-  $('settingsClose').addEventListener('click', close);
-  $('settingsBg').addEventListener('click', (e) => { if (e.target === $('settingsBg')) close(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-  $('settingsSave').addEventListener('click', save);
-  $('heightUnitSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-    const cm = getHeightCm(); setHeightUnit(b.dataset.u); fillHeight(cm);
-  }));
-  $('weightUnitSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-    const v = parseFloat($('weight').value);
-    const kg = v > 0 ? (weightUnit === 'lb' ? v / 2.20462 : v) : null;
-    setWeightUnit(b.dataset.u);
-    if (kg) $('weight').value = weightUnit === 'lb' ? Math.round(kg * 2.20462) : Math.round(kg);
-  }));
-  $('sexSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => setSex(b.dataset.s)));
-
-  /* ---------- WHOOP ---------- */
-  let whStats = null;
-  function relTime(ts) {
-    if (!ts) return 'never';
-    const s = Math.floor((Date.now() - ts) / 1000);
-    if (s < 60) return 'just now';
-    if (s < 3600) return Math.floor(s/60) + ' min ago';
-    if (s < 86400) return Math.floor(s/3600) + ' h ago';
-    return Math.floor(s/86400) + ' d ago';
-  }
-  function renderWhoop(err) {
-    const t = loadJSON(WHOOP_KEY, null);
-    const statusEl = $('whStatus'), txt = $('whStatusText'), syncEl = $('whSync'), action = $('whAction');
-    if (!t || !t.access) {
-      statusEl.classList.remove('on'); txt.textContent = 'Not connected';
-      syncEl.textContent = ''; $('whStats').style.display = 'none';
-      action.textContent = 'Connect on Health page';
-      return;
-    }
-    statusEl.classList.add('on'); txt.textContent = err ? 'Connected (sync failed)' : 'Connected';
-    const last = Number(localStorage.getItem(SYNC_KEY)) || 0;
-    syncEl.textContent = 'Last synced ' + relTime(last);
-    action.textContent = 'Sync now';
-    if (whStats) {
-      $('whStats').style.display = '';
-      $('whRec').textContent   = whStats.rec   != null ? whStats.rec + '%'  : '—';
-      $('whSleep').textContent = whStats.sleep != null ? whStats.sleep + '%' : '—';
-      $('whRhr').textContent   = whStats.rhr   != null ? whStats.rhr         : '—';
-    }
-  }
-  async function wRefresh(t) {
-    if (!t.refresh) return null;
-    try {
-      const r = await fetch('/api/whoop-refresh', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ refresh_token: t.refresh }) });
-      const j = await r.json();
-      if (j.access_token) { const n = { access:j.access_token, refresh:j.refresh_token||t.refresh, expires:Date.now()+(j.expires_in||3500)*1000 }; saveJSON(WHOOP_KEY, n); return n; }
-    } catch (e) {}
-    return null;
-  }
-  async function wFetch(path, t) {
-    const [p, qs] = path.split('?');
-    const params = new URLSearchParams(qs || ''); params.set('path', p);
-    const r = await fetch('/api/whoop-data?' + params.toString(), { headers: { 'Authorization': 'Bearer ' + t.access, 'Accept':'application/json' } });
-    if (r.status === 401) { const n = await wRefresh(t); if (n) return wFetch(path, n); throw new Error('unauthorized'); }
-    if (!r.ok) throw new Error('whoop ' + r.status);
-    return r.json();
-  }
-  async function syncWhoop() {
-    let t = loadJSON(WHOOP_KEY, null);
-    if (!t || !t.access) return;
-    if (t.expires && Date.now() > t.expires - 60000) { const n = await wRefresh(t); if (n) t = n; }
-    try {
-      const [rec, sleep] = await Promise.all([
-        wFetch('/recovery?limit=1', t).catch(()=>null),
-        wFetch('/activity/sleep?limit=1', t).catch(()=>null),
-      ]);
-      const r0 = rec && rec.records && rec.records[0];
-      const s0 = sleep && sleep.records && sleep.records[0];
-      whStats = {
-        rec:   r0 && r0.score && r0.score.recovery_score != null ? Math.round(r0.score.recovery_score) : null,
-        rhr:   r0 && r0.score && r0.score.resting_heart_rate != null ? Math.round(r0.score.resting_heart_rate) : null,
-        sleep: s0 && s0.score && s0.score.sleep_performance_percentage != null ? Math.round(s0.score.sleep_performance_percentage) : null,
-      };
-      localStorage.setItem(SYNC_KEY, String(Date.now()));
-      renderWhoop();
-    } catch (e) { renderWhoop(e); }
-  }
-  $('whAction').addEventListener('click', () => {
-    const t = loadJSON(WHOOP_KEY, null);
-    if (!t || !t.access) { window.location.href = 'health.html'; return; }
-    $('whAction').textContent = 'Syncing…'; syncWhoop();
-  });
-})();
-</script>
 </body>
 </html>

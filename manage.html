@@ -204,7 +204,7 @@ body::after {
 .review-fix-btn { background: rgba(255,255,255,0.06); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.10); }
 .review-fix-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
 
-/* ===== Completion feedback modal (shared pattern with index.html) ===== */
+/* ===== Completion feedback modal (shared pattern with today.html) ===== */
 .modal-bg {
   position: fixed; inset: 0; z-index: 120; display: none;
   align-items: center; justify-content: center; padding: 20px;
@@ -299,7 +299,7 @@ body::after {
 <div class="page">
 
   <div class="head">
-    <a class="icon-btn" href="index.html" aria-label="Back to today">
+    <a class="icon-btn" href="today.html" aria-label="Back to today">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>
       </svg>
@@ -1026,7 +1026,7 @@ body::after {
       hideReclassifyProgress();
       reclassifyRunning = false;
       // Every applyClassification call already fired 'tasks-changed', so any
-      // open decision screen (index.html) has been re-ranking against the
+      // open decision screen (today.html) has been re-ranking against the
       // new metadata live, batch by batch — ranking is computed fresh from
       // storage on every read, there's no separate "rerank" step to trigger.
       $('reclassifyStatus').textContent = 'Reclassified ' + stale.length + ' task' + (stale.length === 1 ? '' : 's') + '. Rankings are already up to date.';
