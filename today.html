@@ -400,22 +400,6 @@ body::after {
 
     <div class="section-divider"></div>
 
-    <label class="field-label">WHOOP</label>
-    <div class="whoop-box">
-      <div class="whoop-row">
-        <span class="whoop-status" id="whStatus"><span class="dot"></span><span id="whStatusText">Not connected</span></span>
-        <span class="whoop-sync" id="whSync"></span>
-      </div>
-      <div class="whoop-stats" id="whStats" style="display:none">
-        <div class="whoop-stat"><div class="v" id="whRec">—</div><div class="l">Recovery</div></div>
-        <div class="whoop-stat"><div class="v" id="whSleep">—</div><div class="l">Sleep</div></div>
-        <div class="whoop-stat"><div class="v" id="whRhr">—</div><div class="l">Rest HR</div></div>
-      </div>
-      <button class="whoop-btn" id="whAction" type="button">Sync now</button>
-    </div>
-
-    <div class="section-divider"></div>
-
     <div class="field">
       <label class="field-label">Height</label>
       <div class="field-row">
@@ -776,8 +760,6 @@ body::after {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const WATER_KEY = 'po_water_v1';
-  const WHOOP_KEY = 'whoop_tokens_v1';
-  const SYNC_KEY  = 'whoop_last_sync';
   const GCAL_KEY  = 'gcal_tokens_v1';
 
   function loadJSON(k, f) { try { return JSON.parse(localStorage.getItem(k)) || f; } catch (e) { return f; } }
@@ -943,7 +925,7 @@ body::after {
   }
 
   /* ---------- open / close ---------- */
-  function open() { populate(); renderWhoop(); renderGcal(); renderAppleHealth(); $('settingsBg').classList.add('show'); syncWhoop(); }
+  function open() { populate(); renderGcal(); renderAppleHealth(); $('settingsBg').classList.add('show'); }
   function close() { $('settingsBg').classList.remove('show'); }
   $('settingsOpen').addEventListener('click', open);
   $('settingsClose').addEventListener('click', close);
@@ -961,78 +943,6 @@ body::after {
   }));
   $('sexSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => setSex(b.dataset.s)));
 
-  /* ---------- WHOOP ---------- */
-  let whStats = null;
-  function relTime(ts) {
-    if (!ts) return 'never';
-    const s = Math.floor((Date.now() - ts) / 1000);
-    if (s < 60) return 'just now';
-    if (s < 3600) return Math.floor(s/60) + ' min ago';
-    if (s < 86400) return Math.floor(s/3600) + ' h ago';
-    return Math.floor(s/86400) + ' d ago';
-  }
-  function renderWhoop(err) {
-    const t = loadJSON(WHOOP_KEY, null);
-    const statusEl = $('whStatus'), txt = $('whStatusText'), syncEl = $('whSync'), action = $('whAction');
-    if (!t || !t.access) {
-      statusEl.classList.remove('on'); txt.textContent = 'Not connected';
-      syncEl.textContent = ''; $('whStats').style.display = 'none';
-      action.textContent = 'Connect on Health page';
-      return;
-    }
-    statusEl.classList.add('on'); txt.textContent = err ? 'Connected (sync failed)' : 'Connected';
-    const last = Number(localStorage.getItem(SYNC_KEY)) || 0;
-    syncEl.textContent = 'Last synced ' + relTime(last);
-    action.textContent = 'Sync now';
-    if (whStats) {
-      $('whStats').style.display = '';
-      $('whRec').textContent   = whStats.rec   != null ? whStats.rec + '%'  : '—';
-      $('whSleep').textContent = whStats.sleep != null ? whStats.sleep + '%' : '—';
-      $('whRhr').textContent   = whStats.rhr   != null ? whStats.rhr         : '—';
-    }
-  }
-  async function wRefresh(t) {
-    if (!t.refresh) return null;
-    try {
-      const r = await fetch('/api/whoop-refresh', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ refresh_token: t.refresh }) });
-      const j = await r.json();
-      if (j.access_token) { const n = { access:j.access_token, refresh:j.refresh_token||t.refresh, expires:Date.now()+(j.expires_in||3500)*1000 }; saveJSON(WHOOP_KEY, n); return n; }
-    } catch (e) {}
-    return null;
-  }
-  async function wFetch(path, t) {
-    const [p, qs] = path.split('?');
-    const params = new URLSearchParams(qs || ''); params.set('path', p);
-    const r = await fetch('/api/whoop-data?' + params.toString(), { headers: { 'Authorization': 'Bearer ' + t.access, 'Accept':'application/json' } });
-    if (r.status === 401) { const n = await wRefresh(t); if (n) return wFetch(path, n); throw new Error('unauthorized'); }
-    if (!r.ok) throw new Error('whoop ' + r.status);
-    return r.json();
-  }
-  async function syncWhoop() {
-    let t = loadJSON(WHOOP_KEY, null);
-    if (!t || !t.access) return;
-    if (t.expires && Date.now() > t.expires - 60000) { const n = await wRefresh(t); if (n) t = n; }
-    try {
-      const [rec, sleep] = await Promise.all([
-        wFetch('/recovery?limit=1', t).catch(()=>null),
-        wFetch('/activity/sleep?limit=1', t).catch(()=>null),
-      ]);
-      const r0 = rec && rec.records && rec.records[0];
-      const s0 = sleep && sleep.records && sleep.records[0];
-      whStats = {
-        rec:   r0 && r0.score && r0.score.recovery_score != null ? Math.round(r0.score.recovery_score) : null,
-        rhr:   r0 && r0.score && r0.score.resting_heart_rate != null ? Math.round(r0.score.resting_heart_rate) : null,
-        sleep: s0 && s0.score && s0.score.sleep_performance_percentage != null ? Math.round(s0.score.sleep_performance_percentage) : null,
-      };
-      localStorage.setItem(SYNC_KEY, String(Date.now()));
-      renderWhoop();
-    } catch (e) { renderWhoop(e); }
-  }
-  $('whAction').addEventListener('click', () => {
-    const t = loadJSON(WHOOP_KEY, null);
-    if (!t || !t.access) { window.location.href = 'health.html'; return; }
-    $('whAction').textContent = 'Syncing…'; syncWhoop();
-  });
 })();
 </script>
 </body>

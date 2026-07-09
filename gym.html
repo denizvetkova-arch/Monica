@@ -30,18 +30,18 @@ const CONFIG = {
     { id: "comm",  name: "Commercial Gym" }
   ],
 
-  // Training split. Most people use Push/Pull/Legs but you can rename
-  // these to "Upper", "Lower", "Full Body", "Day A", anything.
+  // Training split. Can be renamed to anything via the in-app edit-split
+  // screen once you're set up.
   days: [
-    { id: "push", name: "Push" },
-    { id: "pull", name: "Pull" },
-    { id: "legs", name: "Legs" }
+    { id: "legs", name: "Legs" },
+    { id: "waist", name: "Waist" },
+    { id: "calisthenics", name: "Calisthenics" }
   ],
 
   // Split rotation — the order your training days cycle through. Use day
   // ids from `days` above, plus "rest" for off-days. The pill at the top
   // of the app reads this + splitAnchor to compute "what day is today".
-  splitRotation: ["push", "pull", "legs", "rest"],
+  splitRotation: ["legs", "waist", "calisthenics", "rest"],
 
   // Anchor: pair a real calendar date with which split day fell on it.
   // The rotation advances from this point. Set `date` to a recent day
@@ -80,15 +80,15 @@ const CONFIG = {
   // First-run defaults. Once a user logs anything, they edit through
   // the in-app + / gear buttons; this block stays as the seed.
   defaultExercises: [
-    { name: "Bench press",     gym: "comm", day: "push", repMin: 5, repMax: 8,  step: 2.5, startWeight: 60 },
-    { name: "Overhead press",  gym: "comm", day: "push", repMin: 5, repMax: 8,  step: 2.5, startWeight: 35 },
-    { name: "Tricep pushdown", gym: "comm", day: "push", repMin: 8, repMax: 12, step: 2.5, startWeight: 25 },
-    { name: "Pull-ups",        gym: "both", day: "pull", repMin: 5, repMax: 10, step: 1,   startWeight: 0, bw: true },
-    { name: "Barbell row",     gym: "comm", day: "pull", repMin: 6, repMax: 10, step: 2.5, startWeight: 50 },
-    { name: "Bicep curl",      gym: "comm", day: "pull", repMin: 8, repMax: 12, step: 1.25,startWeight: 15 },
-    { name: "Back squat",      gym: "comm", day: "legs", repMin: 5, repMax: 8,  step: 5,   startWeight: 80 },
-    { name: "Romanian deadlift", gym: "comm", day: "legs", repMin: 6, repMax: 10, step: 5, startWeight: 60 },
-    { name: "Leg press",       gym: "comm", day: "legs", repMin: 8, repMax: 12, step: 5,   startWeight: 100 }
+    { name: "Back squat",        gym: "comm", day: "legs", repMin: 5, repMax: 8,  step: 5,   startWeight: 80 },
+    { name: "Romanian deadlift", gym: "comm", day: "legs", repMin: 6, repMax: 10, step: 5,   startWeight: 60 },
+    { name: "Leg press",         gym: "comm", day: "legs", repMin: 8, repMax: 12, step: 5,   startWeight: 100 },
+    { name: "Hanging leg raise", gym: "both", day: "waist", repMin: 8, repMax: 15, step: 1,   startWeight: 0,  bw: true },
+    { name: "Cable crunch",      gym: "comm", day: "waist", repMin: 10, repMax: 15, step: 2.5, startWeight: 25 },
+    { name: "Russian twist",     gym: "both", day: "waist", repMin: 12, repMax: 20, step: 1,   startWeight: 0,  bw: true },
+    { name: "Pull-ups",          gym: "both", day: "calisthenics", repMin: 5, repMax: 10, step: 1, startWeight: 0, bw: true },
+    { name: "Dips",              gym: "both", day: "calisthenics", repMin: 6, repMax: 12, step: 1, startWeight: 0, bw: true },
+    { name: "Push-ups",          gym: "both", day: "calisthenics", repMin: 10, repMax: 20, step: 1, startWeight: 0, bw: true }
   ]
 };
 </script>
@@ -1711,8 +1711,26 @@ img, video, canvas, svg { max-width: 100%; }
     } catch (e) {}
     return normalize({});
   }
+  // One-time split reset (2026-07): Push/Pull/Legs -> Legs/Waist/Calisthenics.
+  // Runs exactly once per device (gated on splitVersion) — after that this
+  // block never touches state again, so any renaming/reordering the user
+  // does afterward through the in-app edit-split screen sticks. Only days,
+  // exercises, and the split rotation/anchor/filter are replaced; logged
+  // history (state.logs) is deliberately left untouched — old sets stay in
+  // storage, just no longer reachable since their exercise ids no longer
+  // appear in the new exercise list. That's the accepted tradeoff of a
+  // clean-slate reset, not a bug.
+  const SPLIT_VERSION = 2;
   function normalize(s) {
     s = s || {};
+    if (s.splitVersion !== SPLIT_VERSION) {
+      s.days = CONFIG.days.slice();
+      s.exercises = buildDefaultExercises();
+      s.splitRotation = null;
+      s.splitAnchor = null;
+      s.filterDay = null;
+      s.splitVersion = SPLIT_VERSION;
+    }
     s.units = s.units || CONFIG.units || 'kg';
     s.gyms  = (Array.isArray(s.gyms)  && s.gyms.length)  ? s.gyms  : CONFIG.gyms.slice();
     s.days  = (Array.isArray(s.days)  && s.days.length)  ? s.days  : CONFIG.days.slice();
@@ -1750,6 +1768,13 @@ img, video, canvas, svg { max-width: 100%; }
     try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {}
   }
   let state = loadState();
+  // Flush immediately: normalize() may have just run the one-time split
+  // migration (or applied first-run defaults) in memory only — without
+  // this, that reset doesn't reach localStorage until some other action
+  // happens to call saveState(), so a reload before any interaction would
+  // silently re-migrate from the untouched old data again (harmless, since
+  // it's idempotent, but not actually "once" the way splitVersion implies).
+  saveState();
   document.getElementById('appTitle').textContent = CONFIG.appTitle || 'Progressive Overload Coach';
 
   // ============================================================

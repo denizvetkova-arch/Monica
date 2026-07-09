@@ -1,7 +1,7 @@
 # Dashboard — Setup Guide (fork → deploy in ~5 min)
 
 This is a static dashboard (plain HTML/JS) that deploys on **Vercel** and syncs across your
-devices with **Supabase**. WHOOP, Apple Health, and Google Calendar are optional add-ons.
+devices with **Supabase**. Apple Health and Google Calendar are optional add-ons.
 
 ---
 
@@ -79,26 +79,7 @@ Replace the old URL/key in these files:
 
 ---
 
-## 3. WHOOP (optional)
-
-1. **developer.whoop.com** → create an app.
-2. Set its **Redirect URI** to exactly: `https://your-app.vercel.app/api/whoop-callback`
-   (use your real Vercel domain — add every domain you'll open the site from).
-3. Put your app's **Client ID** in [`health.html`](health.html) (`const CLIENT_ID = '...'`),
-   and add these in Vercel → **Settings → Environment Variables**, then redeploy:
-
-| Variable | Value |
-|---|---|
-| `WHOOP_CLIENT_ID` | your WHOOP app's Client ID |
-| `WHOOP_CLIENT_SECRET` | your WHOOP app's Client Secret (**secret**) |
-
-4. Open the site at that exact domain → Health page → **Connect WHOOP**.
-
-> The callback auto-detects the domain, so you do **not** need a `WHOOP_REDIRECT_URI` env var.
-
----
-
-## 4. Apple Health (optional) — also how nutrition (Cal AI) gets in
+## 3. Apple Health (optional) — also how nutrition (Cal AI) gets in
 
 Feeds sleep, steps, resting heart rate, workouts, and nutrition (calories/protein/carbs/
 fat/fiber) into Today's State, which the Decision Engine uses to pick lighter work on a
@@ -155,7 +136,7 @@ hours/week).
 
 ---
 
-## 5. Google Calendar (optional)
+## 4. Google Calendar (optional)
 
 Lets the decision screen (`today.html`) see your free/busy time and favor tasks that fit
 the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minutes.
@@ -182,7 +163,7 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 
 6. Redeploy. Open the site → **Main** tile → tap the **gear icon** → **Connect Google Calendar**.
 
-> Unlike WHOOP, the redirect URI here is a **fixed constant** in the code
+> The redirect URI here is a **fixed constant** in the code
 > (`https://monica-zeta-blue.vercel.app/api/google-callback`), not auto-detected from the
 > domain — Google requires an exact match against the one URI registered above, so opening
 > the site via a Vercel preview URL will not work for this feature. If you ever fork this to
@@ -193,7 +174,7 @@ the gap you're currently in. Needs a Google Cloud OAuth client — about 5 minut
 
 ---
 
-## 6. Automatic task classification (optional, but the point of Manage Tasks)
+## 5. Automatic task classification (optional, but the point of Manage Tasks)
 
 Lets **Manage Tasks** (the list icon on the Main screen) infer category, ROI, urgency,
 difficulty, and estimated time from just a task title — "Email professor" or "Costco"
@@ -227,12 +208,12 @@ so it works from every device without re-entering a key on each one.
 
 ---
 
-## 7. Nova (AI mentor / gym coach) — optional
+## 6. Nova (AI mentor / gym coach) — optional
 
 No setup or key in the repo. Each user **pastes their own Anthropic API key** on the
 **Nova** tile; it's stored only in their browser and sent straight to Anthropic. Get a key at
 console.anthropic.com. (This is a separate, browser-side key from the server-side one in
-§6 — Nova and task classification don't share credentials.)
+§5 — Nova and task classification don't share credentials.)
 
 ---
 
@@ -240,9 +221,8 @@ console.anthropic.com. (This is a separate, browser-side key from the server-sid
 1. Fork → import to Vercel → deploy.
 2. New Supabase → run the **SQL** above → paste your **URL + anon key** into `sync.js`,
    `topbar.js`, `gym.html`.
-3. (Optional) WHOOP: Client ID in `health.html` + the two env vars in Vercel.
-4. (Optional) Apple Health: pick a secret token, set `HEALTH_IMPORT_TOKEN` in Vercel, point
+3. (Optional) Apple Health: pick a secret token, set `HEALTH_IMPORT_TOKEN` in Vercel, point
    Health Auto Export's automation at `/api/health-import?token=...`.
-5. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
-6. (Optional) Automatic task classification: `ANTHROPIC_API_KEY` in Vercel.
-7. Change the password in `lock.js`. Done.
+4. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
+5. (Optional) Automatic task classification: `ANTHROPIC_API_KEY` in Vercel.
+6. Change the password in `lock.js`. Done.

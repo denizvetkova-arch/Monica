@@ -2,10 +2,11 @@
 // Persistent dashboard top bar.
 // Drop this on any page with:
 //     <script src="topbar.js" defer></script>
-// It self-injects HTML + CSS: a Finance quick-link up top and an
-// Instagram-style Main/Health/Fitness tab bar at the bottom. (No water
-// widget — Monica treats hydration as a known non-issue, not something
-// tracked per page; see tasks.js's hydrationSubscore.)
+// It self-injects HTML + CSS: a Finance quick-link up top and a single
+// "Main" tab at the bottom that always returns to the home bento grid
+// (index.html). (No water widget — Monica treats hydration as a known
+// non-issue, not something tracked per page; see tasks.js's
+// hydrationSubscore.)
 // =============================================================
 (function () {
   'use strict';
@@ -38,20 +39,19 @@
   opacity: 0.85;
 }
 
-/* Bottom tab bar — Instagram-style */
+/* Bottom bar — single "Main" tab, centered rather than stretched full-width */
 .bottombar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
-  display: flex; justify-content: space-around; align-items: stretch;
+  display: flex; justify-content: center; align-items: stretch;
   padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
   background: #0a0a0b;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
 }
 .bottombar-tab {
-  flex: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 3px;
-  padding: 6px 0 4px;
+  padding: 6px 28px 4px;
   text-decoration: none;
   color: rgba(255, 255, 255, 0.45);
   font-size: 10px; font-weight: 600;
@@ -144,17 +144,9 @@ body.topbar-modal-open {
 
   const bottombarHtml = `
 <nav class="bottombar" id="bottombar" role="navigation" aria-label="Main tabs">
-  <a href="today.html" class="bottombar-tab" data-page="main">
+  <a href="index.html" class="bottombar-tab" data-page="main">
     <span class="bottombar-tab-icon">🏠</span>
     <span>Main</span>
-  </a>
-  <a href="health.html" class="bottombar-tab" data-page="health">
-    <span class="bottombar-tab-icon">💊</span>
-    <span>Health</span>
-  </a>
-  <a href="gym.html" class="bottombar-tab" data-page="fitness">
-    <span class="bottombar-tab-icon">💪</span>
-    <span>Fitness</span>
   </a>
 </nav>
 `;
@@ -165,8 +157,8 @@ body.topbar-modal-open {
     const p = (window.location.pathname || '').toLowerCase();
     return p.endsWith('/finance.html') || p.endsWith('finance.html');
   }
-  // When the water tracker is iframed inside health.html, the embedded
-  // page shouldn't render its own chrome again.
+  // A page opened inside an iframe (e.g. po-water.html, if it's ever
+  // embedded somewhere) shouldn't render its own chrome again.
   function isEmbedded() {
     try { return window.self !== window.top; } catch (e) { return true; }
   }
@@ -175,10 +167,8 @@ body.topbar-modal-open {
   }
   function currentPageKey() {
     const p = (window.location.pathname || '').toLowerCase();
-    if (p.endsWith('health.html')) return 'health';
-    if (p.endsWith('gym.html')) return 'fitness';
-    if (p.endsWith('today.html')) return 'main';
-    return null; // index.html (the home bento grid), /, or anything else — no tab active
+    if (p.endsWith('index.html') || p.endsWith('/')) return 'main';
+    return null; // any other page — the single Main tab just isn't highlighted
   }
 
   function injectStyleAndHTML() {
