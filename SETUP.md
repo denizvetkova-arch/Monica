@@ -81,14 +81,14 @@ Replace the old URL/key in these files:
 
 ## 3. Apple Health (optional) — also how nutrition (Cal AI) gets in
 
-Feeds sleep, steps, resting heart rate, workouts, and nutrition (calories/protein/carbs/
-fat/fiber) into Today's State, which the Decision Engine uses to pick lighter work on a
-rough night, deep work when you're rested, and to factor protein pacing into task choice.
-There's no OAuth here — Apple doesn't let any web app read HealthKit data directly, so a
-small iOS app called **Health Auto Export** (~$5, one-time, App Store) acts as the bridge:
-it posts a JSON export to a webhook on a schedule. "Continuous" in practice means Health
-Auto Export's own background-delivery automation, which iOS batches — expect updates every
-so often through the day, not truly instant.
+Feeds sleep, steps, heart rate, calories, body measurements, and nutrition into Today's
+State, which the Decision Engine uses to pick lighter work on a rough night, deep work when
+you're rested, and to factor protein pacing into task choice. There's no OAuth here — Apple
+doesn't let any web app read HealthKit data directly, so a small iOS app called **Health
+Auto Export** (~$5, one-time, App Store) acts as the bridge: it posts a JSON export to a
+webhook on a schedule. "Continuous" in practice means Health Auto Export's own
+background-delivery automation, which iOS batches — expect updates every so often through
+the day, not truly instant.
 
 **Nutrition specifically needs no separate integration.** Cal AI (and most photo-based
 calorie trackers) write every logged meal's calories/protein/carbs/fat straight to Apple
@@ -105,34 +105,57 @@ along automatically.
 | `HEALTH_IMPORT_TOKEN` | the secret string you picked |
 
    Redeploy after adding it.
-3. Install **Health Auto Export** on your iPhone → grant it Health access for at least:
-   Sleep Analysis, Steps, Resting Heart Rate, Active Energy, and — for the nutrition strip —
-   Dietary Energy, Protein, Carbohydrates, Total Fat, Fiber (these populate automatically
-   once Cal AI or any food-logging app is writing to Apple Health).
+3. Install **Health Auto Export** on your iPhone → grant it Health access for whichever of
+   these you want tracked (nothing breaks if you skip some — untracked metrics just show
+   "Unknown" instead of being estimated or guessed):
+   Sleep Analysis, Step Count, Walking + Running Distance, Apple Exercise Time, Heart Rate,
+   Resting Heart Rate, Heart Rate Variability, Active Energy, Basal Energy Burned, Weight &
+   Body Mass, Body Fat Percentage, Body Mass Index, Flights Climbed, Apple Stand Hour, Blood
+   Oxygen Saturation, Respiratory Rate, VO2 Max, Mindful Session, Workouts — and for the
+   nutrition strip: Dietary Energy, Protein, Carbohydrates, Total Fat, Fiber (these populate
+   automatically once Cal AI or any food-logging app is writing to Apple Health).
 4. In the app: **Automations → New Automation → REST API**.
    - URL: `https://monica-zeta-blue.vercel.app/api/health-import?token=YOUR_TOKEN`
      (use the secret from step 1).
    - Method: **POST**, format **JSON**.
-   - Metrics: select the ones listed in step 3 (more is fine — anything not recognized is
-     safely ignored).
+   - Metrics: select the ones you granted access to in step 3 (more is fine — anything not
+     recognized is safely ignored, never guessed at).
+   - **Date range: "Default" (previous day + today), not "Today."** This matters
+     specifically for sleep — "Today" only syncs the current calendar day up to now, and a
+     sleep session that ended this morning is frequently still mid-sync from Watch → iPhone
+     → Health when the automation's trigger fires. "Default" always includes at least one
+     full completed night, which is what the pipeline actually needs (it picks the most
+     recently *completed* sleep session on its own — see `computeSleep()` in
+     `api/health-import.js` — so a wider window never causes stale-looking sleep numbers,
+     it only prevents missing ones).
    - Trigger: **Automatic** (background delivery) for the closest thing to continuous sync;
      a fixed interval (e.g. hourly) also works and is more predictable.
 5. Run the automation once manually to confirm it works, then open the site → **Main** tile →
    **gear icon** → **Settings** → **Apple Health** box should flip to "Syncing" with a few
    stats filled in.
+6. Open **health-diagnostics.html** (linked from that same Settings box) to see exactly what
+   landed: which metrics were present in your last export, which were missing, any parse
+   warnings, and a side-by-side of the imported/stored/dashboard value for every metric. This
+   is the tool to use if a metric isn't showing up — it tells you directly rather than
+   requiring a guess.
 
 > The webhook **discards the raw payload** after extracting aggregate numbers — it never
-> stores minute-by-minute samples or workout GPS routes, only daily totals/averages.
-> If a metric isn't showing up, check [`api/health-import.js`](api/health-import.js)'s
-> `normalizeHealthPayload()` — Health Auto Export's exact field names have shifted across
-> versions, and that function may need a field-name tweak to match your export (use the
-> app's "Preview Data" screen on your automation to see the real payload shape).
+> stores minute-by-minute samples or workout GPS routes, only daily totals/averages (plus,
+> for diagnostics, a capped trace of the last 20 imports' computed values and warnings — no
+> higher-resolution than what's already in `health_metrics_v1`). If a metric still isn't
+> landing after checking the Diagnostics page, check
+> [`api/health-import.js`](api/health-import.js)'s `normalizeHealthPayload()` — Health Auto
+> Export's exact field names have shifted across versions, and the relevant `extract(...)`
+> call may need another candidate name added (use the app's "Preview Data" screen on your
+> automation to see the real payload shape).
 
 **"Calories remaining"** needs a daily target, which HealthKit has no concept of (only
 consumption samples). The app estimates one from your height/weight/age/sex/activity
 (Mifflin-St Jeor) automatically — no setup needed. To override it with your own number
 instead, set **Daily calorie target** in Settings (gear icon → scroll down, below Active
-hours/week).
+hours/week). **"Stale after (hours)"** in that same box controls when the Apple Health card
+switches to a "⚠ Health data may be outdated" warning instead of presenting old numbers as
+current — defaults to 6 hours.
 
 ---
 

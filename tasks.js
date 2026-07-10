@@ -605,6 +605,22 @@
   // Every input degrades to a neutral subscore when missing, so this
   // works with zero, partial, or full data.
   const HEALTH_METRICS_KEY = 'health_metrics_v1';
+  const HEALTH_SETTINGS_KEY = 'health_settings_v1';
+  const DEFAULT_STALE_HOURS = 6;
+
+  // How long health_metrics_v1 is trusted as "current" before the dashboard
+  // should show a staleness warning instead of presenting old numbers as
+  // if they were fresh — see getEnergyContext()'s `stale` flag below.
+  function getHealthSettings() {
+    const s = loadJSON(HEALTH_SETTINGS_KEY, null);
+    const staleHours = (s && Number.isFinite(s.staleHours) && s.staleHours > 0) ? s.staleHours : DEFAULT_STALE_HOURS;
+    return { staleHours };
+  }
+  function setHealthSettings(patch) {
+    const next = Object.assign({}, getHealthSettings(), patch);
+    try { localStorage.setItem(HEALTH_SETTINGS_KEY, JSON.stringify(next)); } catch (e) {}
+    return next;
+  }
   const CAFFEINE_LOGS_KEY = 'caf:logs';
   const CAFFEINE_ACTIVE_WINDOW_MS = 5 * 3600000; // caffeine's rough effective window
 
@@ -713,10 +729,14 @@
 
     const factors = weighted.map(([sub]) => sub.note).filter(Boolean);
 
+    const staleHours = getHealthSettings().staleHours;
+    const stale = !!(health && health.updatedAt) && (now - health.updatedAt) > staleHours * 3600000;
+
     return {
       level: levelFromScore5(score),
       score,
       connected: !!health,
+      stale,
       factors,
       updatedAt: health && health.updatedAt || null,
     };
@@ -724,6 +744,49 @@
   // Kept as an alias — earlier code (and anything cached) may still call
   // the old name; same function, 5-level output now instead of 3-level.
   const getProductivityContext = getEnergyContext;
+
+  // ---------- Health metric registry ----------
+  // The single source of truth for "how does a health_metrics_v1 field
+  // become display text" — used by both today.html's Settings box and
+  // health-diagnostics.html's per-metric matrix, so there's exactly one
+  // formatting implementation, not two that can silently drift apart.
+  // Deliberately excludes hydration (water tracking was removed).
+  const HEALTH_METRIC_KEYS = [
+    { key: 'sleepHours', label: 'Sleep', unit: 'h', decimals: 1 },
+    { key: 'steps', label: 'Steps', unit: '', decimals: 0 },
+    { key: 'walkingDistanceKm', label: 'Walking Distance', unit: 'km', decimals: 2 },
+    { key: 'exerciseMinutes', label: 'Exercise Minutes', unit: 'min', decimals: 0 },
+    { key: 'heartRate', label: 'Heart Rate', unit: 'bpm', decimals: 0 },
+    { key: 'restingHR', label: 'Resting Heart Rate', unit: 'bpm', decimals: 0 },
+    { key: 'hrv', label: 'HRV', unit: 'ms', decimals: 0 },
+    { key: 'activeEnergyKcal', label: 'Active Calories', unit: 'kcal', decimals: 0 },
+    { key: 'basalEnergyKcal', label: 'Basal Calories', unit: 'kcal', decimals: 0 },
+    { key: 'weightKg', label: 'Weight', unit: 'kg', decimals: 1 },
+    { key: 'bodyFatPct', label: 'Body Fat', unit: '%', decimals: 1 },
+    { key: 'bmi', label: 'BMI', unit: '', decimals: 1 },
+    { key: 'flightsClimbed', label: 'Flights Climbed', unit: '', decimals: 0 },
+    { key: 'standHours', label: 'Stand Hours', unit: 'h', decimals: 0 },
+    { key: 'bloodOxygenPct', label: 'Blood Oxygen', unit: '%', decimals: 1 },
+    { key: 'respiratoryRate', label: 'Respiratory Rate', unit: '/min', decimals: 1 },
+    { key: 'vo2Max', label: 'VO2 Max', unit: 'ml/kg/min', decimals: 1 },
+    { key: 'mindfulMinutes', label: 'Mindfulness', unit: 'min', decimals: 0 },
+    { key: 'dietaryEnergyKcal', label: 'Dietary Calories', unit: 'kcal', decimals: 0 },
+    { key: 'proteinG', label: 'Protein', unit: 'g', decimals: 0 },
+    { key: 'carbsG', label: 'Carbs', unit: 'g', decimals: 0 },
+    { key: 'fatG', label: 'Fat', unit: 'g', decimals: 0 },
+    { key: 'fiberG', label: 'Fiber', unit: 'g', decimals: 0 },
+  ];
+
+  // Never 0 for missing data — "Unknown" instead, always.
+  function formatHealthValue(key, value) {
+    if (value == null) return 'Unknown';
+    const meta = HEALTH_METRIC_KEYS.find(m => m.key === key);
+    if (!meta) return String(value);
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 'Unknown';
+    const rounded = meta.decimals > 0 ? n.toFixed(meta.decimals) : String(Math.round(n));
+    return rounded + (meta.unit ? ' ' + meta.unit : '');
+  }
 
   // ---------- Nutrition ----------
   // Cal AI (and most photo-based calorie trackers) write every logged meal's
@@ -775,6 +838,10 @@
     needsReclassification,
     getEnergyContext,
     getProductivityContext,
+    getHealthSettings,
+    setHealthSettings,
+    HEALTH_METRIC_KEYS,
+    formatHealthValue,
     getCaffeineContext,
     getNutritionContext,
     getStreakContext,

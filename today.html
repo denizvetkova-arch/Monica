@@ -260,6 +260,7 @@ body::after {
 .whoop-stat .l { font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); margin-top: 5px; }
 .whoop-btn { width: 100%; margin-top: 14px; padding: 11px; border: 1px solid rgba(255,255,255,0.12); border-radius: 11px; background: transparent; color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; transition: background 0.15s, color 0.15s; }
 .whoop-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+.ah-stale-warning { margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: rgba(242,192,99,0.12); border: 1px solid rgba(242,192,99,0.35); color: #F2C063; font-size: 12px; font-weight: 600; }
 .more-tools-link { display: block; text-align: center; margin-top: 18px; font-size: 12px; color: var(--text-tertiary); text-decoration: none; }
 .more-tools-link:hover { color: var(--text-primary); }
 
@@ -388,14 +389,20 @@ body::after {
         <span class="whoop-status" id="ahStatus"><span class="dot"></span><span id="ahStatusText">Not set up yet</span></span>
         <span class="whoop-sync" id="ahSync"></span>
       </div>
+      <div class="ah-stale-warning" id="ahStaleWarning" style="display:none">⚠ Health data may be outdated</div>
       <div class="whoop-stats" id="ahStats" style="display:none">
         <div class="whoop-stat"><div class="v" id="ahSleep">—</div><div class="l">Sleep</div></div>
         <div class="whoop-stat"><div class="v" id="ahSteps">—</div><div class="l">Steps</div></div>
         <div class="whoop-stat"><div class="v" id="ahRhr">—</div><div class="l">Rest HR</div></div>
       </div>
+      <div class="field-row" style="margin-top:12px;">
+        <label class="field-label" style="margin-bottom:0;flex:1;">Stale after (hours)</label>
+        <input class="set-input" id="ahStaleHours" type="number" min="1" max="72" style="width:70px;flex:none;" inputmode="numeric">
+      </div>
       <div style="font-size:11px;color:var(--text-tertiary);margin-top:12px;line-height:1.5;">
         Pushed automatically from the Health Auto Export app — no connect button here. See SETUP.md for setup.
       </div>
+      <a class="more-tools-link" href="health-diagnostics.html" style="margin-top:10px;">View Health Diagnostics →</a>
     </div>
 
     <div class="section-divider"></div>
@@ -909,20 +916,39 @@ body::after {
     return Math.floor(s / 86400) + ' d ago';
   }
   function renderAppleHealth() {
+    if (window.Tasks && window.Tasks.getHealthSettings) {
+      $('ahStaleHours').value = window.Tasks.getHealthSettings().staleHours;
+    }
     const h = loadJSON('health_metrics_v1', null);
-    const statusEl = $('ahStatus'), txt = $('ahStatusText'), syncEl = $('ahSync');
+    const statusEl = $('ahStatus'), txt = $('ahStatusText'), syncEl = $('ahSync'), warnEl = $('ahStaleWarning');
     if (!h) {
       statusEl.classList.remove('on'); txt.textContent = 'Not set up yet';
       syncEl.textContent = ''; $('ahStats').style.display = 'none';
+      warnEl.style.display = 'none';
       return;
     }
-    statusEl.classList.add('on'); txt.textContent = 'Syncing';
+    // Reuse tasks.js's own staleness math (getEnergyContext) rather than
+    // re-deriving the threshold check here — one implementation, not two
+    // that can silently drift apart.
+    const energy = (window.Tasks && window.Tasks.getEnergyContext) ? window.Tasks.getEnergyContext() : null;
+    const stale = energy ? energy.stale : false;
+    statusEl.classList.toggle('on', !stale);
+    txt.textContent = stale ? 'Stale' : 'Syncing';
     syncEl.textContent = 'Last synced ' + relTimeAH(h.updatedAt);
+    warnEl.style.display = stale ? '' : 'none';
     $('ahStats').style.display = '';
-    $('ahSleep').textContent = h.sleepHours != null ? h.sleepHours + 'h' : '—';
-    $('ahSteps').textContent = h.steps != null ? h.steps : '—';
-    $('ahRhr').textContent   = h.restingHR != null ? h.restingHR : '—';
+    const fmt = (window.Tasks && window.Tasks.formatHealthValue) || ((k, v) => (v != null ? v : 'Unknown'));
+    $('ahSleep').textContent = fmt('sleepHours', h.sleepHours);
+    $('ahSteps').textContent = fmt('steps', h.steps);
+    $('ahRhr').textContent   = fmt('restingHR', h.restingHR);
   }
+  $('ahStaleHours').addEventListener('change', () => {
+    const v = parseInt($('ahStaleHours').value, 10);
+    if (Number.isFinite(v) && v > 0 && window.Tasks && window.Tasks.setHealthSettings) {
+      window.Tasks.setHealthSettings({ staleHours: v });
+      renderAppleHealth();
+    }
+  });
 
   /* ---------- open / close ---------- */
   function open() { populate(); renderGcal(); renderAppleHealth(); $('settingsBg').classList.add('show'); }
