@@ -190,6 +190,26 @@ body::before {
       </div>
     </div>
 
+    <div class="card">
+      <div class="section-title">Manual Apple Health Validation</div>
+      <div class="section-note">
+        Compare this directly against the Apple Health app. "Raw payload" is exactly what Health Auto Export sent
+        in the last request that mentioned this metric — real metric name, sample count, date range, and a
+        bounded sample — not what the parser assumes. Imported/Stored/Dashboard agreeing (in the table above)
+        only proves the value was copied consistently; it does NOT prove the value itself is correct. This table
+        shows the reasoning behind the number instead.
+      </div>
+      <div class="table-scroll">
+        <table class="metric-table">
+          <thead><tr><th>Metric</th><th>Raw payload</th><th>Aggregation strategy</th><th>Selected date/session</th><th>Calculated</th><th>Reason selected</th></tr></thead>
+          <tbody id="validationRows"></tbody>
+        </table>
+      </div>
+
+      <div class="section-title" style="margin-top:18px;">Sleep Detail</div>
+      <div id="sleepDetail"></div>
+    </div>
+
   </div>
 
 </div>
@@ -296,7 +316,35 @@ body::before {
     return { pass: expected === actual, detail: 'expected stale=' + expected + ', getEnergyContext() returned stale=' + actual };
   }
 
-  function renderMetricRow(meta, latest, stored) {
+  // The dashboard cell is deliberately NOT derived from `stored` — that
+  // would just redisplay the "Stored" column a second time, proving
+  // nothing (see the section-note above the table: Imported=Stored=
+  // Dashboard agreeing only proves consistent copying, not correctness).
+  // `dashboardVals`, when available, comes from actually loading
+  // today.html in a hidden iframe and reading its live rendered DOM text
+  // — a genuinely independent read of what the dashboard shows. Only
+  // sleepHours/steps/restingHR are ever shown on today.html's Settings
+  // box; every other metric honestly reports that it isn't displayed
+  // there rather than faking a comparison.
+  const DASHBOARD_DOM_KEYS = { sleepHours: 'ahSleep', steps: 'ahSteps', restingHR: 'ahRhr' };
+
+  function dashboardCell(meta, sVal, dashboardVals) {
+    const fmt = window.Tasks.formatHealthValue;
+    if (!DASHBOARD_DOM_KEYS[meta.key]) {
+      return '<span class="metric-val unknown">not shown on dashboard</span>';
+    }
+    if (dashboardVals === null) {
+      return '<span class="metric-val unknown">loading…</span>';
+    }
+    const domText = dashboardVals ? dashboardVals[meta.key] : null;
+    const expected = fmt(meta.key, sVal);
+    const mismatch = domText != null && domText !== expected;
+    return '<span class="metric-val' + (domText == null ? ' unknown' : '') + '"' +
+      (mismatch ? ' style="color:var(--danger);" title="Live DOM shows a different value than Stored — dashboard rendering bug"' : '') +
+      '>' + (domText != null ? domText : 'Unknown') + '</span>';
+  }
+
+  function renderMetricRow(meta, latest, stored, dashboardVals) {
     const fmt = window.Tasks.formatHealthValue;
     const parsed = latest ? latest.parsed : null;
     const pVal = parsed ? parsed[meta.key] : null;
@@ -328,7 +376,7 @@ body::before {
     return '<tr><td class="metric-name">' + meta.label + '</td>' +
       '<td class="' + cls(pVal) + '">' + fmt(meta.key, pVal) + '</td>' +
       '<td class="' + cls(sVal) + '">' + fmt(meta.key, sVal) + '</td>' +
-      '<td class="' + cls(sVal) + '">' + fmt(meta.key, sVal) + '</td>' +
+      '<td>' + dashboardCell(meta, sVal, dashboardVals) + '</td>' +
       '<td class="metric-val" style="font-size:10.5px;">' + lastUpdated + '</td>' +
       '<td class="status-cell" title="' + title.replace(/"/g, '') + '">' + status + '</td></tr>';
   }
@@ -366,6 +414,103 @@ body::before {
         '<td class="metric-val">' + preserved + '</td>' +
         '<td class="metric-val">' + rejected + '</td></tr>';
     }).join('');
+  }
+
+  // ---------- Manual Apple Health Validation (Phase 5) ----------
+  // KEY_TO_NAMES mirrors the candidate metric-name lists
+  // api/health-import.js's normalizeHealthPayload() actually searches
+  // for. Duplicated here (this static page can't import a server
+  // module) purely for display, so "Raw payload" can show which real
+  // payload entry, if any, actually fed each calculated value.
+  const KEY_TO_NAMES = {
+    sleepHours: ['sleep_analysis'],
+    steps: ['step_count'], restingHR: ['resting_heart_rate'], heartRate: ['heart_rate', 'walking_heart_rate_average'],
+    activeEnergyKcal: ['active_energy'], basalEnergyKcal: ['basal_energy_burned'],
+    dietaryEnergyKcal: ['dietary_energy', 'dietary_energy_consumed'], proteinG: ['protein', 'dietary_protein'],
+    carbsG: ['carbohydrates', 'dietary_carbohydrates'], fatG: ['total_fat', 'fat_total', 'dietary_fat', 'dietary_fat_total'],
+    fiberG: ['fiber', 'dietary_fiber'], hrv: ['heart_rate_variability'],
+    bloodOxygenPct: ['blood_oxygen_saturation', 'oxygen_saturation'], respiratoryRate: ['respiratory_rate'],
+    vo2Max: ['vo2_max'], flightsClimbed: ['flights_climbed'], exerciseMinutes: ['apple_exercise_time'],
+    standHours: ['apple_stand_hour', 'apple_stand_time'], walkingDistanceKm: ['walking_running_distance', 'distance_walking_running'],
+    weightKg: ['weight_body_mass'], bodyFatPct: ['body_fat_percentage'], bmi: ['body_mass_index'],
+    mindfulMinutes: ['mindful_session'],
+  };
+  const CUMULATIVE_KEYS = new Set(['steps', 'activeEnergyKcal', 'basalEnergyKcal', 'dietaryEnergyKcal', 'proteinG', 'carbsG', 'fatG', 'fiberG', 'flightsClimbed', 'exerciseMinutes', 'standHours', 'walkingDistanceKm', 'mindfulMinutes']);
+  const LATEST_VALUE_KEYS = new Set(['restingHR', 'heartRate', 'hrv', 'bloodOxygenPct', 'respiratoryRate', 'vo2Max', 'weightKg', 'bodyFatPct', 'bmi']);
+
+  function strategyFor(key) {
+    if (key === 'sleepHours') return 'Most recently COMPLETED sleep session (Core+Deep+REM+other Asleep stages; Awake/In Bed excluded; deduplicated; a session with 0 asleep-hours is rejected in favor of a real earlier night)';
+    if (CUMULATIVE_KEYS.has(key)) return "Today's cumulative total — sums only entries dated on the LATEST day present in the payload, never across multiple days";
+    if (LATEST_VALUE_KEYS.has(key)) return 'Most recent dated measurement in the payload (sorted by date; latest wins, even if not from today)';
+    return '—';
+  }
+
+  function findRawShapeFor(key, rawShape) {
+    const names = KEY_TO_NAMES[key] || [];
+    return rawShape && Array.isArray(rawShape.metricsShape) ? rawShape.metricsShape.find(m => names.includes(m.name)) : null;
+  }
+
+  function rawPayloadCell(key, rawShape) {
+    const found = findRawShapeFor(key, rawShape);
+    if (!found) return '<span class="metric-val unknown">not in last payload</span>';
+    const sample = found.lastSample || found.firstSample;
+    const sampleText = sample ? JSON.stringify(sample).replace(/</g, '&lt;') : '';
+    return '<span class="metric-val" style="font-size:10.5px;">' + found.name + ' (' + (found.units || '?') + ')<br>' +
+      found.count + ' sample' + (found.count === 1 ? '' : 's') + ', ' + (found.earliestDate || '?') + ' → ' + (found.latestDate || '?') + '<br>' +
+      '<span style="color:var(--text-tertiary);">' + sampleText + '</span></span>';
+  }
+
+  function selectedRefCell(key, dayKeys, parsed) {
+    if (key === 'sleepHours') {
+      const ss = parsed ? parsed.sleepSessionStart : null, se = parsed ? parsed.sleepSessionEnd : null;
+      if (ss == null || se == null) return '<span class="metric-val unknown">none</span>';
+      return '<span class="metric-val" style="font-size:10.5px;">' + fmtTime(ss) + '<br>→ ' + fmtTime(se) + '</span>';
+    }
+    const day = dayKeys ? dayKeys[key] : null;
+    return day ? '<span class="metric-val">' + day + '</span>' : '<span class="metric-val unknown">—</span>';
+  }
+
+  function reasonCell(key, dayKeys, parsed, rawShape) {
+    if (key === 'sleepHours') {
+      const se = parsed ? parsed.sleepSessionEnd : null;
+      return se ? 'Most recently completed night (by session end)' : 'No completed session with real asleep-hours found';
+    }
+    const found = findRawShapeFor(key, rawShape);
+    const day = dayKeys ? dayKeys[key] : null;
+    if (!found) return 'Metric not present in the last request';
+    if (day == null) return 'Present but no entry had a usable date — see Warnings';
+    return CUMULATIVE_KEYS.has(key) ? ('Latest day in payload: ' + day) : ('Latest dated entry: ' + day);
+  }
+
+  function renderValidationRow(meta, latest) {
+    const parsed = latest ? latest.parsed : null;
+    const dayKeys = latest ? latest.dayKeys : null;
+    const rawShape = latest ? latest.rawShape : null;
+    const val = parsed ? parsed[meta.key] : null;
+    return '<tr><td class="metric-name">' + meta.label + '</td>' +
+      '<td>' + rawPayloadCell(meta.key, rawShape) + '</td>' +
+      '<td class="metric-val" style="font-size:11px;">' + strategyFor(meta.key) + '</td>' +
+      '<td>' + selectedRefCell(meta.key, dayKeys, parsed) + '</td>' +
+      '<td class="' + (val == null ? 'metric-val unknown' : 'metric-val') + '">' + window.Tasks.formatHealthValue(meta.key, val) + '</td>' +
+      '<td class="metric-val" style="font-size:11px;">' + reasonCell(meta.key, dayKeys, parsed, rawShape) + '</td></tr>';
+  }
+
+  function renderSleepDetail(latest) {
+    const parsed = latest ? latest.parsed : null;
+    if (!parsed || parsed.sleepSessionEnd == null) {
+      return '<div class="section-note" style="margin-bottom:0;">No completed sleep session in the last import. Check the Warnings card above for why.</div>';
+    }
+    const stages = parsed.sleepStages || {};
+    const fmtH = (h) => h == null ? 'Unknown' : (Math.round(h * 100) / 100) + ' h';
+    return '<div class="pipeline-row"><span class="pipeline-label">Session start</span><span class="pipeline-value">' + fmtTime(parsed.sleepSessionStart) + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">Session end</span><span class="pipeline-value">' + fmtTime(parsed.sleepSessionEnd) + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">Core</span><span class="pipeline-value">' + fmtH(stages.core) + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">Deep</span><span class="pipeline-value">' + fmtH(stages.deep) + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">REM</span><span class="pipeline-value">' + fmtH(stages.rem) + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">Other asleep</span><span class="pipeline-value">' + fmtH(stages.other) + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">Awake (in this session)</span><span class="pipeline-value">' + fmtH(stages.awake) + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">Source</span><span class="pipeline-value">' + (parsed.sleepSource || 'Unknown') + '</span></div>' +
+      '<div class="pipeline-row"><span class="pipeline-label">Final calculated sleep</span><span class="pipeline-value good">' + window.Tasks.formatHealthValue('sleepHours', parsed.sleepHours) + '</span></div>';
   }
 
   function render() {
@@ -417,9 +562,47 @@ body::before {
 
     renderRecentRequests(diagList);
 
-    const rows = window.Tasks.HEALTH_METRIC_KEYS.map(meta => renderMetricRow(meta, latest, stored))
+    const rows = window.Tasks.HEALTH_METRIC_KEYS.map(meta => renderMetricRow(meta, latest, stored, dashboardVals))
       .concat([renderWorkoutsRow(latest, stored)]);
     $('metricRows').innerHTML = rows.join('');
+
+    $('validationRows').innerHTML = window.Tasks.HEALTH_METRIC_KEYS.map(meta => renderValidationRow(meta, latest)).join('');
+    $('sleepDetail').innerHTML = renderSleepDetail(latest);
+  }
+
+  // null = not yet loaded (shows "loading…"); object = actual live DOM
+  // text read from today.html's Settings box; false = load/read failed.
+  let dashboardVals = null;
+
+  function loadDashboardFromLiveDOM(cb) {
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;';
+    let done = false;
+    const finish = (vals) => {
+      if (done) return;
+      done = true;
+      try { document.body.removeChild(iframe); } catch (e) {}
+      cb(vals);
+    };
+    iframe.addEventListener('load', () => {
+      try {
+        const doc = iframe.contentDocument;
+        const openBtn = doc.getElementById('settingsOpen');
+        if (openBtn) openBtn.click(); // today.html only populates ahSleep/ahSteps/ahRhr when Settings opens
+        setTimeout(() => {
+          try {
+            finish({
+              sleepHours: doc.getElementById('ahSleep') ? doc.getElementById('ahSleep').textContent : null,
+              steps: doc.getElementById('ahSteps') ? doc.getElementById('ahSteps').textContent : null,
+              restingHR: doc.getElementById('ahRhr') ? doc.getElementById('ahRhr').textContent : null,
+            });
+          } catch (e) { finish(false); }
+        }, 400);
+      } catch (e) { finish(false); }
+    });
+    setTimeout(() => finish(false), 5000); // never hang the page on a slow/broken iframe load
+    iframe.src = 'today.html';
+    document.body.appendChild(iframe);
   }
 
   whenReady(function () {
@@ -430,6 +613,7 @@ body::before {
       initCloudSync({ appKey: 'health_metrics', syncedKeys: ['health_metrics_v1'], onApplied: render });
       initCloudSync({ appKey: 'health_diagnostics', syncedKeys: ['health_diagnostics_v1'], onApplied: render });
     }
+    loadDashboardFromLiveDOM((vals) => { dashboardVals = vals; render(); });
     // "Last dashboard refresh" is live — keep it ticking.
     setInterval(render, 60 * 1000);
   });

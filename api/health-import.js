@@ -3,6 +3,26 @@
 // Webhook target for the "Health Auto Export" iOS app's REST API
 // automation.
 //
+// v4 — root-cause audit (July 2026): production data showed sleep
+// reporting 0h despite a real completed ~8h night, with
+// Imported/Stored/Dashboard all agreeing on the wrong value. Root cause,
+// traced (not guessed): computeSleep()'s "most recently completed
+// session" selection sorted candidate sessions purely by sessionEnd,
+// with no check that a session actually had positive asleep-duration —
+// a same-day placeholder/artifact entry with asleep=0 (or an
+// unaggregated "night" whose only Asleep-stage samples summed to 0)
+// could have a LATER sessionEnd than the real prior night and would win
+// the sort, silently shadowing the correct value. Fixed by requiring
+// hours > 0 for a session to be eligible at all (see the `> 0` filters
+// in both the aggregated and unaggregated branches of computeSleep()).
+// This is a logic fix, independent of any field-name assumption.
+// Basal Calories and other multi-day-summation-suspect metrics could
+// NOT be root-caused from code alone — see captureRawShape() below,
+// added specifically so the actual Health Auto Export field names,
+// paths, units, and representative samples are visible on
+// health-diagnostics.html's "Manual Apple Health Validation" section
+// instead of assumed from documentation.
+//
 // v3 — MERGE, not overwrite. A single request used to be trusted as a
 // complete, current snapshot and would overwrite health_metrics_v1
 // wholesale. That broke the moment any request had less data than a
@@ -170,6 +190,18 @@ function latestValueWithDate(entries, fields) {
 const SLEEP_STAGE_ASLEEP = new Set(['asleep', 'asleepcore', 'core', 'asleeprem', 'rem', 'asleepdeep', 'deep', 'asleepunspecified']);
 const SLEEP_STAGE_NOT_ASLEEP = new Set(['awake', 'inbed']);
 
+// For the Phase 5 audit display only — does not change which stages
+// count toward the asleep total (SLEEP_STAGE_ASLEEP above still decides
+// that); this only labels which bucket an asleep stage's hours land in.
+function classifyStageBucket(stage) {
+  if (stage === 'core' || stage === 'asleepcore') return 'core';
+  if (stage === 'rem' || stage === 'asleeprem') return 'rem';
+  if (stage === 'deep' || stage === 'asleepdeep') return 'deep';
+  if (stage === 'awake') return 'awake';
+  if (stage === 'inbed') return 'inBed';
+  return 'other'; // bare "asleep"/"asleepunspecified" — real asleep time, stage unspecified
+}
+
 function dedupeSleepSamples(samples) {
   const seen = new Set();
   let removedCount = 0;
@@ -189,7 +221,7 @@ function dedupeSleepSamples(samples) {
 // only replaces stored sleep data if its session ended at the same
 // time or later.
 function computeSleep(entries, now, warnings) {
-  const EMPTY = { hours: null, sessionStart: null, sessionEnd: null, source: null, dedupedCount: 0 };
+  const EMPTY = { hours: null, sessionStart: null, sessionEnd: null, source: null, dedupedCount: 0, stages: null };
   if (!Array.isArray(entries) || entries.length === 0) {
     warnings.push({
       metric: 'sleep',
@@ -200,16 +232,39 @@ function computeSleep(entries, now, warnings) {
 
   const aggregated = entries.filter(e => e && typeof e.asleep === 'number');
   if (aggregated.length > 0) {
-    const completed = aggregated
-      .map(e => ({ asleep: e.asleep, start: parseDateMs(e.sleepStart), end: parseDateMs(e.sleepEnd), source: e.sleepSource || null }))
+    const completedAll = aggregated
+      .map(e => ({
+        asleep: e.asleep,
+        core: typeof e.core === 'number' ? e.core : null,
+        deep: typeof e.deep === 'number' ? e.deep : null,
+        rem: typeof e.rem === 'number' ? e.rem : null,
+        start: parseDateMs(e.sleepStart), end: parseDateMs(e.sleepEnd), source: e.sleepSource || null,
+      }))
       .filter(e => e.end != null && e.end <= now);
+    // A completed entry with asleep===0 is not a real night — it's the
+    // shape a same-day placeholder/in-progress-detection artifact takes
+    // in some exports. Without this filter, such an entry's (often very
+    // recent) sleepEnd can outrank a real prior night in the "most
+    // recent" sort below and silently report 0h instead of last night's
+    // real total. Never substitute 0 for missing data (see file header):
+    // a 0-duration "session" IS missing data, so it must not win.
+    const completed = completedAll.filter(e => e.asleep > 0);
     if (completed.length === 0) {
-      warnings.push({ metric: 'sleep', message: 'aggregated sleep entries found but none have a completed sleepEnd in the past (still in progress)' });
+      const skippedZero = completedAll.length;
+      warnings.push({
+        metric: 'sleep',
+        message: skippedZero > 0
+          ? skippedZero + ' completed aggregated sleep entr' + (skippedZero === 1 ? 'y had' : 'ies had') + ' asleep=0 (likely a same-day placeholder, not a real night) and ' + (skippedZero === 1 ? 'was' : 'were') + ' skipped'
+          : 'aggregated sleep entries found but none have a completed sleepEnd in the past (still in progress)',
+      });
       return EMPTY;
     }
     completed.sort((a, b) => b.end - a.end);
     const best = completed[0];
-    return { hours: best.asleep, sessionStart: best.start, sessionEnd: best.end, source: best.source, dedupedCount: 0 };
+    return {
+      hours: best.asleep, sessionStart: best.start, sessionEnd: best.end, source: best.source, dedupedCount: 0,
+      stages: { core: best.core, deep: best.deep, rem: best.rem, other: null, awake: null },
+    };
   }
 
   let unparseable = 0;
@@ -244,43 +299,57 @@ function computeSleep(entries, now, warnings) {
 
   const nightSummaries = nights.map(night => {
     const bySource = {};
+    const bySourceStages = {};
     let sessionStart = Infinity, sessionEnd = -Infinity;
     let anyAsleep = false, anyNotAsleep = false;
     night.forEach(s => {
       sessionStart = Math.min(sessionStart, s.start);
       sessionEnd = Math.max(sessionEnd, s.end);
+      const hours = s.qty != null ? s.qty : (s.end - s.start) / 3600000;
+      const key = s.source || 'unknown';
+      const bucket = classifyStageBucket(s.stage);
+      bySourceStages[key] = bySourceStages[key] || { core: 0, deep: 0, rem: 0, other: 0, awake: 0, inBed: 0 };
       if (SLEEP_STAGE_ASLEEP.has(s.stage)) {
         anyAsleep = true;
-        const hours = s.qty != null ? s.qty : (s.end - s.start) / 3600000;
-        const key = s.source || 'unknown';
         bySource[key] = (bySource[key] || 0) + hours;
+        bySourceStages[key][bucket] = (bySourceStages[key][bucket] || 0) + hours;
       } else if (SLEEP_STAGE_NOT_ASLEEP.has(s.stage)) {
         anyNotAsleep = true;
+        bySourceStages[key][bucket] = (bySourceStages[key][bucket] || 0) + hours;
       }
     });
     const sourceTotals = Object.entries(bySource).sort((a, b) => b[1] - a[1]);
+    const bestSource = sourceTotals.length ? sourceTotals[0][0] : null;
     return {
       sessionStart, sessionEnd,
       hours: sourceTotals.length ? sourceTotals[0][1] : null,
-      source: sourceTotals.length ? sourceTotals[0][0] : null,
+      source: bestSource,
+      stages: bestSource ? bySourceStages[bestSource] : null,
       onlyNonAsleep: anyNotAsleep && !anyAsleep,
     };
   });
 
-  const completedNights = nightSummaries.filter(n => n.sessionEnd <= now && n.hours != null);
+  // Same zero-duration guard as the aggregated branch above: a "night"
+  // whose only Asleep-stage samples summed to exactly 0 hours is not a
+  // real night's sleep and must not be allowed to outrank an earlier,
+  // genuine night just because it happens to end more recently.
+  const completedNights = nightSummaries.filter(n => n.sessionEnd <= now && n.hours != null && n.hours > 0);
   if (completedNights.length === 0) {
     const allOnlyNonAsleep = nightSummaries.length > 0 && nightSummaries.every(n => n.onlyNonAsleep);
+    const zeroButCompleted = nightSummaries.filter(n => n.sessionEnd <= now && n.hours === 0).length;
     warnings.push({
       metric: 'sleep',
       message: allOnlyNonAsleep
         ? nightSummaries.length + ' sleep_analysis group(s) found but all were Awake/InBed — no Asleep-stage segments to count'
-        : 'sleep_analysis entries found but none formed a completed (already-ended) night',
+        : (zeroButCompleted > 0
+            ? zeroButCompleted + ' completed sleep group(s) had 0 total asleep-hours (likely a same-day placeholder/artifact) and were skipped in favor of a real night'
+            : 'sleep_analysis entries found but none formed a completed (already-ended) night'),
     });
     return Object.assign({}, EMPTY, { dedupedCount: removedCount });
   }
   completedNights.sort((a, b) => b.sessionEnd - a.sessionEnd);
   const best = completedNights[0];
-  return { hours: best.hours, sessionStart: best.sessionStart, sessionEnd: best.sessionEnd, source: best.source, dedupedCount: removedCount };
+  return { hours: best.hours, sessionStart: best.sessionStart, sessionEnd: best.sessionEnd, source: best.source, dedupedCount: removedCount, stages: best.stages };
 }
 
 // ---------- Workouts ----------
@@ -340,6 +409,72 @@ function mergeWorkouts(storedPool, candidateWorkouts, now) {
     },
     recentWorkouts: capped.slice(0, 5),
     duplicatesRemoved,
+  };
+}
+
+// ---------- Raw payload shape capture (diagnostic only) ----------
+// Phase 1 of the July 2026 correctness audit: this NEVER feeds parsing
+// or merge decisions — it exists purely so health-diagnostics.html can
+// show what Health Auto Export actually sent (exact metric names, JSON
+// paths, units, counts, date ranges, a bounded first/last sample) rather
+// than what the extractors above assume. Bounded and truncated so it
+// stays a "structure + limited representative sample" view, never a
+// full raw-body dump.
+function safeSampleValue(v) {
+  if (v == null || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v.length > 40 ? v.slice(0, 40) + '…' : v;
+  return '[object]';
+}
+
+function safeSample(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const out = {};
+  Object.keys(entry).forEach(k => { out[k] = safeSampleValue(entry[k]); });
+  return out;
+}
+
+function dateOfEntry(e) {
+  if (!e) return null;
+  if (typeof e.date === 'string') return e.date;
+  if (typeof e.startDate === 'string') return e.startDate;
+  if (typeof e.sleepStart === 'string') return e.sleepStart;
+  return null;
+}
+
+export function captureRawShape(body, now) {
+  const root = (body && body.data) || body || {};
+  const metrics = Array.isArray(root.metrics) ? root.metrics : [];
+  const workouts = Array.isArray(root.workouts) ? root.workouts : [];
+
+  const metricsShape = metrics.map((m, idx) => {
+    const data = Array.isArray(m && m.data) ? m.data : [];
+    const dates = data.map(dateOfEntry).filter(Boolean).sort();
+    const sources = Array.from(new Set(data.map(e => e && (e.source || e.sleepSource)).filter(Boolean))).slice(0, 5);
+    let shapeHint = 'unknown';
+    if (data.length && typeof data[0].asleep === 'number') shapeHint = 'aggregated (has numeric "asleep" field)';
+    else if (data.length && typeof data[0].startDate === 'string' && typeof data[0].value === 'string') shapeHint = 'unaggregated (has startDate + string "value" field)';
+    else if (data.length && typeof data[0].qty === 'number') shapeHint = 'qty-based';
+    return {
+      name: (m && m.name) || null,
+      units: (m && m.units) || null,
+      path: 'data.metrics[' + idx + ']',
+      count: data.length,
+      earliestDate: dates[0] || null,
+      latestDate: dates[dates.length - 1] || null,
+      firstSample: safeSample(data[0]),
+      lastSample: data.length > 1 ? safeSample(data[data.length - 1]) : null,
+      sources,
+      shapeHint,
+    };
+  });
+
+  return {
+    capturedAt: now,
+    topLevelKeys: Object.keys(root),
+    metricsCount: metrics.length,
+    metricsShape,
+    workoutsCount: workouts.length,
+    workoutSample: workouts.length ? safeSample(workouts[0]) : null,
   };
 }
 
@@ -416,6 +551,7 @@ export function normalizeHealthPayload(body, now) {
     sleepSessionStart: sleep.sessionStart,
     sleepSessionEnd: sleep.sessionEnd,
     sleepSource: sleep.source,
+    sleepStages: sleep.stages,
     steps: round(summary.steps, 0),
     restingHR: round(summary.restingHR, 0),
     heartRate: round(summary.heartRate, 0),
@@ -460,7 +596,7 @@ const MERGEABLE_KEYS = [
   'respiratoryRate', 'vo2Max', 'flightsClimbed', 'exerciseMinutes', 'standHours',
   'walkingDistanceKm', 'weightKg', 'bodyFatPct', 'bmi', 'mindfulMinutes',
 ];
-const SLEEP_COMPANION_KEYS = ['sleepSessionStart', 'sleepSessionEnd', 'sleepSource'];
+const SLEEP_COMPANION_KEYS = ['sleepSessionStart', 'sleepSessionEnd', 'sleepSource', 'sleepStages'];
 
 export function mergeHealthState(stored, candidate, dayKeys, now) {
   stored = stored || {};
@@ -641,6 +777,7 @@ export default async function handler(req, res) {
 
   const { summary: candidate, dayKeys, parsedWorkouts, sleepDedupedCount, diagnostics } = normalizeHealthPayload(body, now);
   if (bodyParseError) diagnostics.warnings.unshift({ metric: 'body', message: 'request body was not valid JSON: ' + bodyParseError });
+  const rawShape = bodyParseError ? null : captureRawShape(body, now);
 
   if (!supabaseUrl || !supabaseKey) return res.status(500).json({ error: 'server not configured (missing SUPABASE_URL / SUPABASE_ANON_KEY)' });
 
@@ -695,6 +832,8 @@ export default async function handler(req, res) {
     parsedWorkoutsCount: parsedWorkouts.length,
     warnings: diagnostics.warnings,
     parsed: candidate,
+    dayKeys,
+    rawShape,
     selfCheck,
     savedOk,
   }).catch(() => {});
