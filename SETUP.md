@@ -128,20 +128,39 @@ along automatically.
      recently *completed* sleep session on its own — see `computeSleep()` in
      `api/health-import.js` — so a wider window never causes stale-looking sleep numbers,
      it only prevents missing ones).
+   - **Batch Requests: ON.** This is required, not optional, if you select more than a
+     handful of metrics or ever run a manual export over more than a day or two — Vercel
+     rejects any single request over 4.5MB with `413 FUNCTION_PAYLOAD_TOO_LARGE`, and that's
+     a hard limit on Vercel's side with no server-side workaround (confirmed against
+     Vercel's own docs — not a Monica bug to patch around). Batch Requests makes Health Auto
+     Export split one export into several smaller HTTP requests to the same URL instead of
+     one giant one. The receiving endpoint (`api/health-import.js`) is built to merge these
+     safely regardless of order or overlap — sleep in one request and steps in another both
+     land correctly, an older request arriving late never overwrites newer data with stale
+     data, and the same workout appearing in two overlapping requests is only counted once.
+     There's no "batch size" to tune here; Health Auto Export decides how to split it.
    - Trigger: **Automatic** (background delivery) for the closest thing to continuous sync;
      a fixed interval (e.g. hourly) also works and is more predictable.
 5. Run the automation once manually to confirm it works, then open the site → **Main** tile →
    **gear icon** → **Settings** → **Apple Health** box should flip to "Syncing" with a few
    stats filled in.
 6. Open **health-diagnostics.html** (linked from that same Settings box) to see exactly what
-   landed: which metrics were present in your last export, which were missing, any parse
-   warnings, and a side-by-side of the imported/stored/dashboard value for every metric. This
-   is the tool to use if a metric isn't showing up — it tells you directly rather than
+   landed: a **Recent Requests** list of every request the server actually received (by
+   size, and what each one merged/preserved/rejected), plus a per-metric matrix with a
+   **Last Updated** column per metric — sleep and steps can genuinely come from different
+   requests now, so there's no single blob-level "last synced" timestamp anymore. This is
+   the tool to use if a metric isn't showing up — it tells you directly rather than
    requiring a guess.
 
+> **A request that still 413s never reaches Monica at all** — Vercel rejects it before this
+> server's code ever runs, so it will not appear in Recent Requests or anywhere else on the
+> Diagnostics page. If a sync seems to have vanished entirely (nothing new in Recent
+> Requests after running the automation), check Health Auto Export's own **Activity Log**
+> for a 413/error status, and confirm Batch Requests is actually ON.
+>
 > The webhook **discards the raw payload** after extracting aggregate numbers — it never
 > stores minute-by-minute samples or workout GPS routes, only daily totals/averages (plus,
-> for diagnostics, a capped trace of the last 20 imports' computed values and warnings — no
+> for diagnostics, a capped trace of the last 20 requests' computed values and warnings — no
 > higher-resolution than what's already in `health_metrics_v1`). If a metric still isn't
 > landing after checking the Diagnostics page, check
 > [`api/health-import.js`](api/health-import.js)'s `normalizeHealthPayload()` — Health Auto

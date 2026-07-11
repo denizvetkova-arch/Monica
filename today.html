@@ -261,8 +261,8 @@ body::after {
 .whoop-btn { width: 100%; margin-top: 14px; padding: 11px; border: 1px solid rgba(255,255,255,0.12); border-radius: 11px; background: transparent; color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; transition: background 0.15s, color 0.15s; }
 .whoop-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
 .ah-stale-warning { margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: rgba(242,192,99,0.12); border: 1px solid rgba(242,192,99,0.35); color: #F2C063; font-size: 12px; font-weight: 600; }
-.more-tools-link { display: block; text-align: center; margin-top: 18px; font-size: 12px; color: var(--text-tertiary); text-decoration: none; }
-.more-tools-link:hover { color: var(--text-primary); }
+.more-tools-link, .health-diag-link { display: block; text-align: center; margin-top: 18px; font-size: 12px; color: var(--text-tertiary); text-decoration: none; }
+.more-tools-link:hover, .health-diag-link:hover { color: var(--text-primary); }
 
 /* ===== Today's Calendar (on the decision screen) ===== */
 .cal-section { margin-top: 22px; }
@@ -402,7 +402,7 @@ body::after {
       <div style="font-size:11px;color:var(--text-tertiary);margin-top:12px;line-height:1.5;">
         Pushed automatically from the Health Auto Export app — no connect button here. See SETUP.md for setup.
       </div>
-      <a class="more-tools-link" href="health-diagnostics.html" style="margin-top:10px;">View Health Diagnostics →</a>
+      <a class="health-diag-link" href="health-diagnostics.html" style="margin-top:10px;">View Health Diagnostics →</a>
     </div>
 
     <div class="section-divider"></div>
