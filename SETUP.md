@@ -259,6 +259,68 @@ console.anthropic.com. (This is a separate, browser-side key from the server-sid
 
 ---
 
+## 7. Voice/Chat Assistant API (`/api/ask`, `/api/todos`) — Phase 1, optional
+
+Two new server routes turn Monica into something a voice app or chat client can talk to:
+
+- **`POST /api/ask`** — body `{ "message": "..." }`, replies `{ "ok": true, "reply": "..." }`.
+  The system prompt is built from your **current open to-dos** and your **Life Context**
+  profile (the same text field from §5, Settings → Life Context) — Claude can add, complete,
+  or reschedule to-dos via tool use.
+- **`GET`/`POST /api/todos`** — read the list (`GET`) or mutate it (`POST` with
+  `{"action": "add"|"complete"|"reschedule"|"delete", ...}`).
+
+**Important:** these endpoints read and write the exact same to-do list the dashboard already
+shows (`tasks.js`'s list, synced via the `tasks` row in Supabase) — not a separate store. A
+to-do added by voice appears in **Manage Tasks** within about a second, same as editing it on
+another device; nothing you do here is invisible to the rest of the app.
+
+Both routes require a bearer token on every request — there's no login flow, just a shared
+secret you choose.
+
+### Setting the environment variables in Vercel
+
+1. **Pick a secret token.** Any long random string works — e.g. generate one with
+   `openssl rand -hex 32` in a terminal, or use a password manager. This is **not** your
+   Anthropic API key; it's a separate secret only Monica's caller (you, or whatever voice
+   app you build in a later phase) needs to know.
+2. **Confirm you have an Anthropic API key.** If you already set up §5 (automatic task
+   classification), `ANTHROPIC_API_KEY` is already configured and these new routes reuse it
+   — skip to step 4. Otherwise get one at **console.anthropic.com** (pay-as-you-go).
+3. In the Vercel dashboard, open this project → **Settings → Environment Variables**, and
+   add:
+
+| Variable | Value | Environments |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | your Anthropic API key | Production, Preview, Development |
+| `ASSISTANT_API_TOKEN` | the random secret you generated in step 1 | Production, Preview, Development |
+
+   For each one: type the **Key**, paste the **Value**, leave all three environment
+   checkboxes ticked (unless you specifically want different tokens per environment), then
+   click **Save**.
+4. **Redeploy** — Vercel → **Deployments** tab → "..." menu on the latest deployment →
+   **Redeploy** (env var changes don't apply to already-running deployments).
+5. **Test it** from a terminal, replacing `YOUR_TOKEN` and the URL:
+
+```bash
+curl -s https://monica-zeta-blue.vercel.app/api/ask \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What'"'"'s on my to-do list?"}'
+```
+
+   A working response looks like `{"ok":true,"reply":"..."}`. `{"ok":false,"error":"invalid
+   or missing bearer token"}` means the header didn't match `ASSISTANT_API_TOKEN` exactly —
+   double-check the redeploy happened and the token has no extra whitespace.
+
+> Never put `ASSISTANT_API_TOKEN` or `ANTHROPIC_API_KEY` in client-side code, a public repo,
+> or a URL — unlike `HEALTH_IMPORT_TOKEN` (which Health Auto Export sends as a `?token=`
+> query param because it has no way to set headers), these two are always sent as an
+> `Authorization: Bearer` header by whatever calls `/api/ask`/`/api/todos`, so they never end
+> up logged in a URL.
+
+---
+
 ## TL;DR
 1. Fork → import to Vercel → deploy.
 2. New Supabase → run the **SQL** above → paste your **URL + anon key** into `sync.js`,
@@ -267,4 +329,5 @@ console.anthropic.com. (This is a separate, browser-side key from the server-sid
    Health Auto Export's automation at `/api/health-import?token=...`.
 4. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
 5. (Optional) Automatic task classification: `ANTHROPIC_API_KEY` in Vercel.
-6. Change the password in `lock.js`. Done.
+6. (Optional) Voice/chat assistant API: `ANTHROPIC_API_KEY` + `ASSISTANT_API_TOKEN` in Vercel.
+7. Change the password in `lock.js`. Done.
