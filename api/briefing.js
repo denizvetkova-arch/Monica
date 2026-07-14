@@ -1,7 +1,28 @@
 // ============================================================
 // GET /api/briefing
-// Reply: { ok: true, reply: string, newsSource: 'web_search'|'rss_llm'|'rss_raw'|'unavailable',
+// Reply: { ok: true, reply: string, newsSource: 'rss_llm'|'rss_raw'|'unavailable',
 //          generatedAt: number, cached: boolean } | { ok: false, error }
+//
+// v3 — RSS is the PRIMARY (only) news source; Claude's web_search tool
+// is not used at all in this endpoint. v2 tried web_search first with
+// RSS as a fallback, but the fallback prompt told Claude "live web
+// search was not available for this request" — and Claude, given that
+// framing, sometimes wrote a long apologetic explanation of the search
+// failure instead of just using the provided headlines, which is what
+// actually surfaced as "a long rambling apology" in production. RSS
+// being primary (not a fallback being explained away) removes that
+// framing entirely, and also means this endpoint can never hit a web
+// search rate/usage limit or add web search's per-search cost.
+//
+// News gathering, in code (not model-driven): fetchCategorizedHeadlines()
+// below keyword-matches the Life Context text against a small fixed
+// set of topics (AI/tech, biomedical, markets) and fetches each
+// matched topic's Google News RSS search feed (free, keyless) in
+// parallel, always alongside the general top-stories feed as a
+// baseline. Claude then only SELECTS and SUMMARIZES from that fixed,
+// real headline list — it is never asked to search, and the prompt
+// never mentions search/RSS/technical details at all, so there is
+// nothing for it to comment on or apologize about.
 //
 // v2 — pre-generated and cached. A Vercel Cron job (see vercel.json)
 // hits this SAME endpoint once a day to warm the cache; a normal
@@ -37,14 +58,12 @@
 // there's nothing for it to hallucinate or omit.
 //
 // NEWS RELIABILITY: composeNewsSection() below NEVER throws and NEVER
-// returns empty text — it tries Claude's web_search tool, then (on
-// ANY failure, including a request-level 400 for web search being
-// disabled, OR a same-200-response per-search error like
-// max_uses_exceeded/too_many_requests — see evaluateSearchOutcome)
-// falls back to Google News' free RSS feed summarized by Claude, then
-// (if even that fails) the raw RSS headlines with no LLM involved at
-// all, and only as an absolute last resort an honest one-line apology
-// — never a blank section, never a fabricated headline.
+// returns empty text — Claude summarizes the fetched RSS headlines
+// (source 'rss_llm'); if the LLM call itself fails, the raw headlines
+// are used directly with no LLM involved (source 'rss_raw'); only if
+// every RSS feed is also unreachable does it fall to a single short,
+// honest sentence (source 'unavailable') — never a blank section,
+// never a fabricated headline, and never more than one sentence.
 //
 // Auth: Authorization: Bearer <ASSISTANT_API_TOKEN> (normal callers)
 //    or Authorization: Bearer <CRON_SECRET> (Vercel Cron — automatic,
@@ -217,29 +236,7 @@ export function buildWeatherSection(w) {
   return parts.join(' ');
 }
 
-// ---------- News (Claude web_search, with a guaranteed-non-empty fallback chain) ----------
-
-// A web_search_tool_result block's `content` is an ARRAY of results on
-// success (possibly empty — "no matches" is not an error) or a single
-// error OBJECT ({type:'web_search_tool_result_error', error_code}) on
-// failure — e.g. max_uses_exceeded or too_many_requests. Both come
-// back as a normal 200 response with the error embedded in this
-// block, NOT a thrown exception, so a naive try/catch around the
-// whole request misses it. This inspects the actual outcome so the
-// caller can fall back whenever real search didn't produce anything
-// usable, not just when the request failed outright.
-export function evaluateSearchOutcome(content) {
-  const resultBlocks = (content || []).filter((b) => b && b.type === 'web_search_tool_result');
-  if (resultBlocks.length === 0) {
-    return { ok: false, reason: 'no web search was performed for this request' };
-  }
-  const succeeded = resultBlocks.filter((b) => Array.isArray(b.content));
-  if (succeeded.length === 0) {
-    const codes = resultBlocks.map((b) => b.content && b.content.error_code).filter(Boolean);
-    return { ok: false, reason: 'every web search attempt failed (' + (codes.length ? codes.join(', ') : 'unknown error') + ') — likely a rate limit or usage cap' };
-  }
-  return { ok: true, reason: null };
-}
+// ---------- News (RSS primary, category-matched to Life Context — no web_search tool) ----------
 
 export function parseRSSTitles(xml, limit) {
   const items = [];
@@ -264,48 +261,63 @@ async function fetchNewsHeadlines(query) {
   return parseRSSTitles(xml, 12);
 }
 
-export function buildNewsPrompt(lifeContext, newsHeadlines) {
-  const lines = [
-    'Write ONLY the news portion of a spoken-word morning briefing — plain conversational text, no markdown, no headers, no bullet points, no numbered lists, no asterisks, and no preamble like "Here are the top stories."',
-    'Pick the 3 news stories most relevant to these interests, each as one or two spoken sentences:',
-    lifeContext ? lifeContext : '(not set — pick broadly interesting, non-partisan headlines instead)',
-  ];
-  if (newsHeadlines && newsHeadlines.length) {
-    lines.push(
-      '',
-      'Live web search was not available for this request. Choose the 3 most relevant headlines from this fixed list instead of searching — do not invent stories not on this list:',
-      newsHeadlines.map((h) => '- ' + h).join('\n'),
-    );
-  } else {
-    lines.push('', 'Use web search to find today\'s real, current top stories relevant to those interests.');
-  }
-  return lines.join('\n');
+// Small fixed set of topics, each backed by its own free/keyless
+// Google News RSS search query — this IS the "fixed list of free RSS
+// feeds," just parameterized by topic rather than by publisher, since
+// Google News RSS is the one feed already proven reliable and
+// consistently parseable by parseRSSTitles above. Matching is a plain
+// case-insensitive substring check against the Life Context text —
+// deliberately simple and predictable over an LLM-driven categorization
+// step, which would just be one more thing that could fail.
+export const NEWS_CATEGORIES = [
+  { id: 'ai_tech', keywords: ['ai', 'artificial intelligence', 'machine learning', 'tech', 'technology', 'software', 'startup', 'computer science', 'programming', 'coding'], query: 'artificial intelligence technology' },
+  { id: 'biomedical', keywords: ['biomedical', 'biotech', 'biotechnology', 'medicine', 'medical', 'health research', 'glp-1', 'glp1', 'pharma', 'pharmaceutical', 'clinical', 'life sciences', 'genomics'], query: 'biomedical research health science' },
+  { id: 'markets', keywords: ['market', 'markets', 'stock', 'stocks', 'finance', 'financial', 'economy', 'economic', 'investing', 'investment', 'business'], query: 'stock market economy finance' },
+];
+
+export function matchNewsCategories(lifeContext) {
+  const lower = (lifeContext || '').toLowerCase();
+  return NEWS_CATEGORIES.filter((c) => c.keywords.some((k) => lower.includes(k)));
 }
 
-async function newsViaWebSearch(client, lifeContext) {
-  const messages = [{ role: 'user', content: buildNewsPrompt(lifeContext, null) }];
-  for (let i = 0; i < 4; i++) {
-    const response = await client.messages.create({
-      model: 'claude-opus-4-8',
-      max_tokens: 1024,
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }],
-      messages,
-    });
-    if (response.stop_reason === 'pause_turn') {
-      messages.push({ role: 'assistant', content: response.content });
-      continue;
+// Always fetches the general top-stories feed alongside any matched
+// topics (parallel, via allSettled so one dead feed can't take the
+// others down with it), dedupes by exact title, caps the combined
+// list so the prompt stays a reasonable size.
+export async function fetchCategorizedHeadlines(lifeContext) {
+  const matched = matchNewsCategories(lifeContext);
+  const queries = matched.map((c) => c.query);
+  queries.push(null); // general top stories, always included as a baseline
+  const settled = await Promise.allSettled(queries.map((q) => fetchNewsHeadlines(q)));
+  const seen = new Set();
+  const combined = [];
+  for (const result of settled) {
+    if (result.status !== 'fulfilled') continue;
+    for (const title of result.value) {
+      if (!seen.has(title)) { seen.add(title); combined.push(title); }
     }
-    const outcome = evaluateSearchOutcome(response.content);
-    if (!outcome.ok) throw new Error(outcome.reason);
-    return response.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
   }
-  throw new Error('web search turn did not complete after multiple pauses');
+  return combined.slice(0, 20);
 }
 
-async function newsViaRSSAndLLM(client, lifeContext) {
-  const query = lifeContext ? lifeContext.slice(0, 200) : '';
-  const headlines = await fetchNewsHeadlines(query);
-  if (!headlines.length) throw new Error('RSS feed returned no headlines');
+// No mention of search/RSS/technical details anywhere in this prompt —
+// that framing is exactly what caused Claude to write a long apology
+// instead of just reporting the news in production. Claude only ever
+// sees "here are today's headlines," never "search failed."
+export function buildNewsPrompt(lifeContext, headlines) {
+  return [
+    'Write ONLY the news portion of a spoken-word morning briefing — plain conversational text, no markdown, no headers, no bullet points, no numbered lists, no asterisks.',
+    'Report the news directly, the way a person would read it aloud — no preamble, no disclaimers, no meta-commentary, no explanation of how this information was put together.',
+    'From the real, current headlines below, pick the 3 most relevant to these interests and summarize each in one or two spoken sentences:',
+    lifeContext ? lifeContext : '(not set — pick broadly interesting, non-partisan headlines instead)',
+    '',
+    'Headlines:',
+    headlines.map((h) => '- ' + h).join('\n'),
+  ].join('\n');
+}
+
+async function newsViaRSSAndLLM(client, lifeContext, headlines) {
+  if (!headlines.length) throw new Error('no headlines available from any RSS feed');
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 1024,
@@ -318,30 +330,28 @@ export function newsViaRawHeadlines(headlines) {
   return 'In the news: ' + headlines.slice(0, 3).join('. ') + '.';
 }
 
-// Four-tier fallback: web search -> RSS summarized by Claude -> raw
-// RSS headlines (no LLM at all) -> an honest one-line apology. Never
-// throws, never returns an empty string — this section is guaranteed
-// non-empty by construction, not by hope.
+// Three-tier fallback, all rooted in the same code-fetched headlines:
+// Claude summarizes them -> if the LLM call fails, use the raw
+// headlines directly, no LLM -> if RSS itself is unreachable, one
+// short, honest sentence. Never throws, never returns an empty
+// string, and the final fallback is deliberately ONE short sentence,
+// not a paragraph.
 export async function composeNewsSection(client, lifeContext) {
+  let headlines = [];
   try {
-    const text = await newsViaWebSearch(client, lifeContext);
-    if (text) return { text, source: 'web_search' };
-    throw new Error('web search path returned no text');
+    headlines = await fetchCategorizedHeadlines(lifeContext);
+  } catch (e) {
+    headlines = [];
+  }
+  try {
+    const text = await newsViaRSSAndLLM(client, lifeContext, headlines);
+    if (text) return { text, source: 'rss_llm' };
+    throw new Error('LLM returned no text');
   } catch (e1) {
-    try {
-      const text = await newsViaRSSAndLLM(client, lifeContext);
-      if (text) return { text, source: 'rss_llm' };
-      throw new Error('rss+LLM path returned no text');
-    } catch (e2) {
-      try {
-        const query = lifeContext ? lifeContext.slice(0, 200) : '';
-        const headlines = await fetchNewsHeadlines(query);
-        if (!headlines.length) throw new Error('no headlines');
-        return { text: newsViaRawHeadlines(headlines), source: 'rss_raw' };
-      } catch (e3) {
-        return { text: 'I wasn\'t able to pull today\'s news due to a technical issue — everything else in this briefing is accurate.', source: 'unavailable' };
-      }
+    if (headlines.length) {
+      return { text: newsViaRawHeadlines(headlines), source: 'rss_raw' };
     }
+    return { text: 'I couldn\'t pull today\'s news.', source: 'unavailable' };
   }
 }
 

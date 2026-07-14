@@ -274,7 +274,7 @@ Three server routes turn Monica into something a voice app or chat client can ta
 - **`GET`/`POST /api/todos`** *(Phase 1)* — read the list (`GET`) or mutate it (`POST` with
   `{"action": "add"|"complete"|"reschedule"|"delete", ...}`).
 - **`GET /api/briefing`** *(Phase 2, pre-generated and cached)* — no body. Replies
-  `{ "ok": true, "reply": "...", "newsSource": "web_search"|"rss_llm"|"rss_raw"|"unavailable", "generatedAt": <ms>, "cached": true|false }`.
+  `{ "ok": true, "reply": "...", "newsSource": "rss_llm"|"rss_raw"|"unavailable", "generatedAt": <ms>, "cached": true|false }`.
   A **Vercel Cron job** (see below) generates the briefing once a day and caches it in
   Supabase; a normal request returns that cached copy **instantly** (`"cached": true`) and
   only falls back to a slower live generation (`"cached": false`) if today's cache is missing
@@ -296,14 +296,15 @@ Three server routes turn Monica into something a voice app or chat client can ta
   constants near the top of the file) since there's no per-user location setting yet — edit
   those three constants and redeploy if you move.
 
-  **News always has something to say — 4 fallback tiers, never empty:** tries Claude's
-  `web_search` tool first (`newsSource: "web_search"`); if that's unavailable *or* hits a
-  rate/usage limit mid-request (Anthropic returns those as a normal 200 with the error
-  embedded in the response, not a failure — `api/briefing.js` specifically checks for this,
-  it doesn't just catch exceptions), falls back to Google News' free RSS feed summarized by
-  Claude (`"rss_llm"`); if Claude itself is unreachable, falls back further to the raw RSS
-  headlines with no LLM involved at all (`"rss_raw"`); only if literally everything fails does
-  it say so honestly (`"unavailable"`) instead of inventing a story.
+  **News is RSS-first, not a Claude web-search fallback — it can never hit a search rate limit
+  or add search cost.** `api/briefing.js` keyword-matches your Life Context against a small
+  fixed set of topics (AI/tech, biomedical, markets) and fetches each matched topic's Google
+  News RSS feed (free, keyless) in code, always alongside a general top-stories feed as a
+  baseline — Claude never searches, it only picks and summarizes from that real, fixed
+  headline list (`"rss_llm"`). If that summarization call fails, the raw headlines are used
+  directly with no LLM involved (`"rss_raw"`); only if every RSS feed is also unreachable does
+  it fall back to one short, honest sentence (`"unavailable"`) — never a blank section, never
+  a fabricated headline, and never more than one sentence.
 
 ### Setting up the daily cron job
 
@@ -384,9 +385,11 @@ curl -s https://monica-zeta-blue.vercel.app/api/briefing \
    of waiting for the cron job — or to confirm the cron path itself works — replace
    `YOUR_TOKEN` with your `CRON_SECRET` instead of `ASSISTANT_API_TOKEN` and repeat the
    `/api/briefing` call; it's accepted the same way. Check `newsSource` in the response:
-   `"web_search"` is the normal path; `"rss_llm"` or `"rss_raw"` means web search was
-   unavailable (likely disabled in the Anthropic Console, or you hit its rate/usage limit) and
-   the free RSS fallback ran instead — not a bug, just Monica falling back as designed.
+   `"rss_llm"` is the normal path (Claude successfully summarized the fetched headlines);
+   `"rss_raw"` means Claude's summarization call itself failed and you're seeing the raw
+   headlines instead — worth a look if it persists, since RSS fetching succeeded but the
+   Anthropic API call didn't; `"unavailable"` means every RSS feed was unreachable too, which
+   would point at a network/DNS issue on Vercel's end rather than anything in this repo.
 
 > Never put `ASSISTANT_API_TOKEN`, `CRON_SECRET`, or `ANTHROPIC_API_KEY` in client-side code,
 > a public repo, or a URL — unlike `HEALTH_IMPORT_TOKEN` (which Health Auto Export sends as a
