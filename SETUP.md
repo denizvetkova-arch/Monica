@@ -273,16 +273,55 @@ Three server routes turn Monica into something a voice app or chat client can ta
   `false`, for a normal chat-window reply.
 - **`GET`/`POST /api/todos`** *(Phase 1)* — read the list (`GET`) or mutate it (`POST` with
   `{"action": "add"|"complete"|"reschedule"|"delete", ...}`).
-- **`GET /api/briefing`** *(Phase 2)* — no body. Replies
-  `{ "ok": true, "reply": "...", "newsSource": "web_search"|"rss_fallback" }`: a spoken-word
-  daily briefing — weather, UV index, what to wear, umbrella advice, then the top 3 news
-  stories relevant to your Life Context — always in plain TTS-ready text, no markdown.
+- **`GET /api/briefing`** *(Phase 2, pre-generated and cached)* — no body. Replies
+  `{ "ok": true, "reply": "...", "newsSource": "web_search"|"rss_llm"|"rss_raw"|"unavailable", "generatedAt": <ms>, "cached": true|false }`.
+  A **Vercel Cron job** (see below) generates the briefing once a day and caches it in
+  Supabase; a normal request returns that cached copy **instantly** (`"cached": true`) and
+  only falls back to a slower live generation (`"cached": false`) if today's cache is missing
+  — e.g. the cron hasn't fired yet, or its run failed.
+
+  The reply always follows this exact structure — the greeting and the transition line are
+  literal fixed strings the server concatenates, not something Claude is asked to reproduce
+  word-for-word, and the weather section is plain arithmetic on real Open-Meteo data, not
+  model output, so none of it can be paraphrased, dropped, or hallucinated:
+  1. *"Good morning Deni, I see that you have slept well."*
+  2. Weather: condition (a simple word — rain, clouds, sun, etc.), high/low, the UV index, the
+     sunscreen time window (first–last hour today the UV index is ≥3, the WHO/EPA "moderate"
+     threshold), and a plain yes/no on an umbrella (precipitation probability ≥40%). No
+     hydration or other health tips — deliberately excluded.
+  3. *"Now it's time to direct your attention to what matters most."*
+  4. Claude's top 3 news picks relevant to your Life Context.
+
   **Location is hardcoded to Evanston, Illinois** in `api/briefing.js` (`LAT`/`LON`/`TIMEZONE`
   constants near the top of the file) since there's no per-user location setting yet — edit
-  those three constants and redeploy if you move. Weather comes from Open-Meteo (free, no key
-  needed). News tries Claude's `web_search` tool first; if web search is disabled for your
-  Anthropic account (**Console → Settings → Privacy**), it automatically falls back to
-  Google News' free RSS feed instead — `newsSource` in the response tells you which one ran.
+  those three constants and redeploy if you move.
+
+  **News always has something to say — 4 fallback tiers, never empty:** tries Claude's
+  `web_search` tool first (`newsSource: "web_search"`); if that's unavailable *or* hits a
+  rate/usage limit mid-request (Anthropic returns those as a normal 200 with the error
+  embedded in the response, not a failure — `api/briefing.js` specifically checks for this,
+  it doesn't just catch exceptions), falls back to Google News' free RSS feed summarized by
+  Claude (`"rss_llm"`); if Claude itself is unreachable, falls back further to the raw RSS
+  headlines with no LLM involved at all (`"rss_raw"`); only if literally everything fails does
+  it say so honestly (`"unavailable"`) instead of inventing a story.
+
+### Setting up the daily cron job
+
+`vercel.json` (repo root) already defines the schedule — **Vercel auto-detects it on deploy,
+no dashboard step needed** beyond setting the `CRON_SECRET` env var below. It calls
+`/api/briefing` once a day, which is what actually generates and caches that day's briefing.
+
+> **Why two cron entries, and why they're approximate:** Vercel Cron schedules run in **UTC
+> only** — there's no timezone field. 6:58 AM in Evanston is 11:58 UTC during Daylight Saving
+> (CDT, roughly mid-March–early November) but 12:58 UTC the rest of the year (CST). The two
+> entries in `vercel.json` approximate this by switching at calendar-month boundaries instead
+> of the exact DST transition date, so the very first few days of March and the transition day
+> in November may fire about an hour off from 6:58 local — harmless, since a missing/stale
+> cache just means the next real request generates it live instead. **If you're on Vercel's
+> free Hobby plan**, there's a second, larger imprecision: Hobby cron jobs are only guaranteed
+> to fire *sometime within the scheduled hour*, not at the exact minute — Pro/Enterprise fire
+> within the scheduled minute. Either way this only affects *when the cache gets pre-warmed*,
+> never correctness.
 
 **Important:** `/api/ask` and `/api/todos` read and write the exact same to-do list the
 dashboard already shows (`tasks.js`'s list, synced via the `tasks` row in Supabase) — not a
@@ -294,10 +333,15 @@ shared secret you choose.
 
 ### Setting the environment variables in Vercel
 
-1. **Pick a secret token.** Any long random string works — e.g. generate one with
-   `openssl rand -hex 32` in a terminal, or use a password manager. This is **not** your
-   Anthropic API key; it's a separate secret only Monica's caller (you, or whatever voice
-   app you build in a later phase) needs to know.
+1. **Pick two secret tokens** — e.g. generate each with `openssl rand -hex 32` in a terminal,
+   or a password manager:
+   - `ASSISTANT_API_TOKEN` — for you (or whatever voice app you build) to call `/api/ask`,
+     `/api/todos`, `/api/briefing` manually.
+   - `CRON_SECRET` — a **separate** secret, used only by Vercel's own cron job to call
+     `/api/briefing` automatically once a day. Vercel sends this one for you as an
+     `Authorization: Bearer` header on every cron-triggered request — you never send it
+     yourself. Don't reuse `ASSISTANT_API_TOKEN` for it; they're deliberately different
+     credentials for two different callers.
 2. **Confirm you have an Anthropic API key.** If you already set up §5 (automatic task
    classification), `ANTHROPIC_API_KEY` is already configured and these new routes reuse it
    — skip to step 4. Otherwise get one at **console.anthropic.com** (pay-as-you-go).
@@ -308,12 +352,15 @@ shared secret you choose.
 |---|---|---|
 | `ANTHROPIC_API_KEY` | your Anthropic API key | Production, Preview, Development |
 | `ASSISTANT_API_TOKEN` | the random secret you generated in step 1 | Production, Preview, Development |
+| `CRON_SECRET` | the second, separate random secret from step 1 | Production, Preview, Development |
 
    For each one: type the **Key**, paste the **Value**, leave all three environment
    checkboxes ticked (unless you specifically want different tokens per environment), then
-   click **Save**.
+   click **Save**. Once `CRON_SECRET` is set, Vercel starts sending it automatically on cron
+   requests — there's no separate toggle to flip.
 4. **Redeploy** — Vercel → **Deployments** tab → "..." menu on the latest deployment →
-   **Redeploy** (env var changes don't apply to already-running deployments).
+   **Redeploy** (env var changes don't apply to already-running deployments; this is also
+   what makes Vercel notice the `crons` block in `vercel.json` for the first time).
 5. **Test it** from a terminal, replacing `YOUR_TOKEN` and the URL:
 
 ```bash
@@ -327,16 +374,24 @@ curl -s https://monica-zeta-blue.vercel.app/api/briefing \
 ```
 
    A working response looks like `{"ok":true,"reply":"..."}`. `{"ok":false,"error":"invalid
-   or missing bearer token"}` means the header didn't match `ASSISTANT_API_TOKEN` exactly —
-   double-check the redeploy happened and the token has no extra whitespace. For
-   `/api/briefing`, check `newsSource` in the response — `"rss_fallback"` most likely means
-   web search is off in the Anthropic Console, not that anything is broken.
+   or missing bearer token"}` means the header didn't match `ASSISTANT_API_TOKEN` (or
+   `CRON_SECRET`) exactly — double-check the redeploy happened and the token has no extra
+   whitespace.
 
-> Never put `ASSISTANT_API_TOKEN` or `ANTHROPIC_API_KEY` in client-side code, a public repo,
-> or a URL — unlike `HEALTH_IMPORT_TOKEN` (which Health Auto Export sends as a `?token=`
-> query param because it has no way to set headers), these two are always sent as an
-> `Authorization: Bearer` header by whatever calls `/api/ask`/`/api/todos`, so they never end
-> up logged in a URL.
+   The first `/api/briefing` call each day returns `"cached": false` (nothing generated yet —
+   it ran live, which takes a few seconds) and every call after that returns `"cached": true`
+   instantly, until the next calendar day in Evanston. To manually pre-warm the cache instead
+   of waiting for the cron job — or to confirm the cron path itself works — replace
+   `YOUR_TOKEN` with your `CRON_SECRET` instead of `ASSISTANT_API_TOKEN` and repeat the
+   `/api/briefing` call; it's accepted the same way. Check `newsSource` in the response:
+   `"web_search"` is the normal path; `"rss_llm"` or `"rss_raw"` means web search was
+   unavailable (likely disabled in the Anthropic Console, or you hit its rate/usage limit) and
+   the free RSS fallback ran instead — not a bug, just Monica falling back as designed.
+
+> Never put `ASSISTANT_API_TOKEN`, `CRON_SECRET`, or `ANTHROPIC_API_KEY` in client-side code,
+> a public repo, or a URL — unlike `HEALTH_IMPORT_TOKEN` (which Health Auto Export sends as a
+> `?token=` query param because it has no way to set headers), these are always sent as an
+> `Authorization: Bearer` header, so they never end up logged in a URL.
 
 ---
 
@@ -349,5 +404,6 @@ curl -s https://monica-zeta-blue.vercel.app/api/briefing \
 4. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
 5. (Optional) Automatic task classification: `ANTHROPIC_API_KEY` in Vercel.
 6. (Optional) Voice/chat assistant API (`/api/ask`, `/api/todos`, `/api/briefing`):
-   `ANTHROPIC_API_KEY` + `ASSISTANT_API_TOKEN` in Vercel.
+   `ANTHROPIC_API_KEY` + `ASSISTANT_API_TOKEN` + `CRON_SECRET` in Vercel — the daily briefing
+   cron job in `vercel.json` is picked up automatically on deploy, no extra step.
 7. Change the password in `lock.js`. Done.
