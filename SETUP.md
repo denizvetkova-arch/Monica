@@ -259,11 +259,11 @@ console.anthropic.com. (This is a separate, browser-side key from the server-sid
 
 ---
 
-## 7. Voice/Chat Assistant API (`/api/ask`, `/api/todos`) — Phase 1, optional
+## 7. Voice/Chat Assistant API (`/api/ask`, `/api/todos`, `/api/briefing`) — optional
 
-Two new server routes turn Monica into something a voice app or chat client can talk to:
+Three server routes turn Monica into something a voice app or chat client can talk to:
 
-- **`POST /api/ask`** — body `{ "message": "...", "voice": false }`, replies
+- **`POST /api/ask`** *(Phase 1)* — body `{ "message": "...", "voice": false }`, replies
   `{ "ok": true, "reply": "..." }`. The system prompt is built from your **current open
   to-dos** and your **Life Context** profile (the same text field from §5, Settings → Life
   Context) — Claude can add, complete, or reschedule to-dos via tool use. Set `"voice": true`
@@ -271,16 +271,26 @@ Two new server routes turn Monica into something a voice app or chat client can 
   replies in short, conversational plain text with no markdown, 2-4 sentences unless the
   answer genuinely needs more (e.g. listing several to-dos by name). Omit it, or leave it
   `false`, for a normal chat-window reply.
-- **`GET`/`POST /api/todos`** — read the list (`GET`) or mutate it (`POST` with
+- **`GET`/`POST /api/todos`** *(Phase 1)* — read the list (`GET`) or mutate it (`POST` with
   `{"action": "add"|"complete"|"reschedule"|"delete", ...}`).
+- **`GET /api/briefing`** *(Phase 2)* — no body. Replies
+  `{ "ok": true, "reply": "...", "newsSource": "web_search"|"rss_fallback" }`: a spoken-word
+  daily briefing — weather, UV index, what to wear, umbrella advice, then the top 3 news
+  stories relevant to your Life Context — always in plain TTS-ready text, no markdown.
+  **Location is hardcoded to Evanston, Illinois** in `api/briefing.js` (`LAT`/`LON`/`TIMEZONE`
+  constants near the top of the file) since there's no per-user location setting yet — edit
+  those three constants and redeploy if you move. Weather comes from Open-Meteo (free, no key
+  needed). News tries Claude's `web_search` tool first; if web search is disabled for your
+  Anthropic account (**Console → Settings → Privacy**), it automatically falls back to
+  Google News' free RSS feed instead — `newsSource` in the response tells you which one ran.
 
-**Important:** these endpoints read and write the exact same to-do list the dashboard already
-shows (`tasks.js`'s list, synced via the `tasks` row in Supabase) — not a separate store. A
-to-do added by voice appears in **Manage Tasks** within about a second, same as editing it on
-another device; nothing you do here is invisible to the rest of the app.
+**Important:** `/api/ask` and `/api/todos` read and write the exact same to-do list the
+dashboard already shows (`tasks.js`'s list, synced via the `tasks` row in Supabase) — not a
+separate store. A to-do added by voice appears in **Manage Tasks** within about a second,
+same as editing it on another device; nothing you do here is invisible to the rest of the app.
 
-Both routes require a bearer token on every request — there's no login flow, just a shared
-secret you choose.
+All three routes require a bearer token on every request — there's no login flow, just a
+shared secret you choose.
 
 ### Setting the environment variables in Vercel
 
@@ -311,11 +321,16 @@ curl -s https://monica-zeta-blue.vercel.app/api/ask \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message": "What'"'"'s on my to-do list?"}'
+
+curl -s https://monica-zeta-blue.vercel.app/api/briefing \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
    A working response looks like `{"ok":true,"reply":"..."}`. `{"ok":false,"error":"invalid
    or missing bearer token"}` means the header didn't match `ASSISTANT_API_TOKEN` exactly —
-   double-check the redeploy happened and the token has no extra whitespace.
+   double-check the redeploy happened and the token has no extra whitespace. For
+   `/api/briefing`, check `newsSource` in the response — `"rss_fallback"` most likely means
+   web search is off in the Anthropic Console, not that anything is broken.
 
 > Never put `ASSISTANT_API_TOKEN` or `ANTHROPIC_API_KEY` in client-side code, a public repo,
 > or a URL — unlike `HEALTH_IMPORT_TOKEN` (which Health Auto Export sends as a `?token=`
@@ -333,5 +348,6 @@ curl -s https://monica-zeta-blue.vercel.app/api/ask \
    Health Auto Export's automation at `/api/health-import?token=...`.
 4. (Optional) Google Calendar: OAuth client in Google Cloud Console + the two env vars in Vercel.
 5. (Optional) Automatic task classification: `ANTHROPIC_API_KEY` in Vercel.
-6. (Optional) Voice/chat assistant API: `ANTHROPIC_API_KEY` + `ASSISTANT_API_TOKEN` in Vercel.
+6. (Optional) Voice/chat assistant API (`/api/ask`, `/api/todos`, `/api/briefing`):
+   `ANTHROPIC_API_KEY` + `ASSISTANT_API_TOKEN` in Vercel.
 7. Change the password in `lock.js`. Done.
