@@ -10,15 +10,21 @@
 // Context" profile (same Supabase row api/ask.js reads — see
 // SETUP.md §5/§7).
 //
-// News sourcing: tries Claude's web_search tool first. Per Anthropic's
-// docs, if web search is disabled for the account/org, the API rejects
-// the request with a clean 400 before any search runs (not an error
-// buried in a result block) — that failure, or any other error on this
-// path, triggers a fallback: fetch headlines from Google News' free,
-// keyless RSS feed (parsed with a small regex — no XML library
-// dependency, consistent with this repo's zero-dependency style) and
-// ask Claude to pick the 3 most relevant from that fixed list instead
-// of searching live. `newsSource` in the response says which path ran.
+// News sourcing: tries Claude's web_search tool first. Two distinct
+// failure shapes both trigger the fallback below: (1) web search
+// disabled for the account/org — the API rejects the whole request
+// with a clean 400 before any search runs; (2) a per-search failure —
+// max_uses_exceeded or too_many_requests (rate limit) — which the API
+// returns as a NORMAL 200 response with the error embedded inside a
+// web_search_tool_result content block, not a thrown exception.
+// evaluateSearchOutcome() below inspects the actual result blocks so
+// case (2) is caught too — otherwise a rate-limited search would
+// silently ship a newsless briefing instead of falling back. Either
+// way, the fallback fetches headlines from Google News' free, keyless
+// RSS feed (parsed with a small regex — no XML library dependency,
+// consistent with this repo's zero-dependency style) and asks Claude
+// to pick the 3 most relevant from that fixed list instead of
+// searching live. `newsSource` in the response says which path ran.
 //
 // Auth: Authorization: Bearer <ASSISTANT_API_TOKEN> (same token as
 // api/ask.js and api/todos.js).
@@ -155,6 +161,30 @@ export function buildBriefingPrompt(weatherText, lifeContext, newsHeadlines) {
   return lines.join('\n');
 }
 
+// A web_search_tool_result block's `content` is an ARRAY of results on
+// success (possibly empty — "no matches" is not an error) or a single
+// error OBJECT ({type:'web_search_tool_result_error', error_code}) on
+// failure — e.g. max_uses_exceeded or too_many_requests. Both of those
+// come back as a normal 200 response with the error embedded in this
+// block, NOT a thrown exception — so a naive try/catch around the
+// whole request never notices a rate-limited or usage-capped search
+// and silently ships a newsless briefing. This inspects the actual
+// search outcome so the caller can fall back to RSS whenever real
+// search didn't produce anything usable, not just when the request
+// failed outright.
+export function evaluateSearchOutcome(content) {
+  const resultBlocks = (content || []).filter((b) => b && b.type === 'web_search_tool_result');
+  if (resultBlocks.length === 0) {
+    return { ok: false, reason: 'no web search was performed for this request' };
+  }
+  const succeeded = resultBlocks.filter((b) => Array.isArray(b.content));
+  if (succeeded.length === 0) {
+    const codes = resultBlocks.map((b) => b.content && b.content.error_code).filter(Boolean);
+    return { ok: false, reason: 'every web search attempt failed (' + (codes.length ? codes.join(', ') : 'unknown error') + ') — likely a rate limit or usage cap' };
+  }
+  return { ok: true, reason: null };
+}
+
 // Server tool (web_search) can pause a long search turn — resend the
 // paused assistant content unchanged to continue, per Anthropic's docs.
 async function composeWithWebSearch(client, weatherText, lifeContext) {
@@ -170,6 +200,8 @@ async function composeWithWebSearch(client, weatherText, lifeContext) {
       messages.push({ role: 'assistant', content: response.content });
       continue;
     }
+    const outcome = evaluateSearchOutcome(response.content);
+    if (!outcome.ok) throw new Error(outcome.reason);
     return response.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
   }
   throw new Error('web search turn did not complete after multiple pauses');
