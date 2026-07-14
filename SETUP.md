@@ -263,10 +263,14 @@ console.anthropic.com. (This is a separate, browser-side key from the server-sid
 
 Two new server routes turn Monica into something a voice app or chat client can talk to:
 
-- **`POST /api/ask`** — body `{ "message": "..." }`, replies `{ "ok": true, "reply": "..." }`.
-  The system prompt is built from your **current open to-dos** and your **Life Context**
-  profile (the same text field from §5, Settings → Life Context) — Claude can add, complete,
-  or reschedule to-dos via tool use.
+- **`POST /api/ask`** — body `{ "message": "...", "voice": false }`, replies
+  `{ "ok": true, "reply": "..." }`. The system prompt is built from your **current open
+  to-dos** and your **Life Context** profile (the same text field from §5, Settings → Life
+  Context) — Claude can add, complete, or reschedule to-dos via tool use. Set `"voice": true`
+  when the reply will be spoken aloud (text-to-speech) rather than read as text — Claude
+  replies in short, conversational plain text with no markdown, 2-4 sentences unless the
+  answer genuinely needs more (e.g. listing several to-dos by name). Omit it, or leave it
+  `false`, for a normal chat-window reply.
 - **`GET`/`POST /api/todos`** — read the list (`GET`) or mutate it (`POST` with
   `{"action": "add"|"complete"|"reschedule"|"delete", ...}`).
 

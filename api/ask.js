@@ -1,7 +1,11 @@
 // ============================================================
 // POST /api/ask
-// Body: { message: string }
+// Body: { message: string, voice?: boolean }
 // Reply: { ok: true, reply: string } | { ok: false, error }
+//
+// voice: true tells Claude the reply will be spoken aloud (TTS) rather
+// than read as text — short, conversational, no markdown. Omit/false
+// for the normal chat-window style (still concise, but not TTS-tuned).
 //
 // Phase 1 of the voice-driven-assistant work: a chat entry point for
 // Monica. The system prompt is built from the SAME data the dashboard
@@ -146,14 +150,14 @@ const TOOLS = [
   },
 ];
 
-export function buildSystemPrompt(tasks, lifeContext) {
+export function buildSystemPrompt(tasks, lifeContext, voice) {
   const open = tasks.filter((t) => !t.done);
   const list = open.length
     ? open.map((t) => '- [' + t.id + '] ' + t.title +
         (t.deadline ? ' (due ' + t.deadline + ')' : '') +
         ' — ' + t.lifeDomain + ', importance ' + t.longTermROI + '/10, ~' + t.estimatedMinutes + 'min').join('\n')
     : '(no open to-dos)';
-  return [
+  const lines = [
     'You are Monica, Deni\'s personal AI executive assistant, talking with them directly (this may be read aloud or shown in a small chat window — be concise and direct, not verbose).',
     '',
     'Current open to-dos:',
@@ -163,7 +167,14 @@ export function buildSystemPrompt(tasks, lifeContext) {
     lifeContext ? lifeContext : '(not set yet)',
     '',
     'Use the add_todo / complete_todo / reschedule_todo tools for any change Deni asks for — never just claim you made a change without calling the tool. Use the exact id shown in brackets above when completing or rescheduling an existing to-do. If a to-do Deni refers to isn\'t in the list above, ask for clarification instead of guessing an id.',
-  ].join('\n');
+  ];
+  if (voice) {
+    lines.push(
+      '',
+      'This reply will be spoken aloud through text-to-speech, not read as text. Reply in short, conversational plain text: no markdown (no headers, bullet points, asterisks, or code blocks), no numbered lists — say things the way you\'d say them out loud. Aim for 2-4 sentences; only go longer if the answer genuinely needs it (e.g. listing several to-dos by name).',
+    );
+  }
+  return lines.join('\n');
 }
 
 // Executes one tool call against the in-memory task list and returns
@@ -207,6 +218,7 @@ export default async function handler(req, res) {
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = {}; } }
   const message = body && typeof body.message === 'string' ? body.message.trim() : '';
   if (!message) return res.status(400).json({ ok: false, error: 'message required' });
+  const voice = !!(body && body.voice);
 
   const [tasksState, lifeContextState] = await Promise.all([
     readAppState(supabaseUrl, supabaseKey, 'tasks'),
@@ -224,7 +236,7 @@ export default async function handler(req, res) {
       const response = await client.messages.create({
         model: 'claude-opus-4-8',
         max_tokens: 1024,
-        system: buildSystemPrompt(tasks, lifeContext),
+        system: buildSystemPrompt(tasks, lifeContext, voice),
         tools: TOOLS,
         messages,
       });
