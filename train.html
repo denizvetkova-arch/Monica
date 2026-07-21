@@ -27,6 +27,7 @@
   --text-secondary: #B8B6B0;
   --text-tertiary: #76746E;
   --success: #6BE3A4;
+  --danger: #FF6B6B;
   --accent: #E07658;
   --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
@@ -85,7 +86,13 @@ body::before {
 .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #E07658, #FAFAFA); transition: width 0.3s ease; }
 
 /* ===== Flashcard ===== */
-.card-title { font-size: 19px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin-bottom: 20px; }
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.card-title { font-size: 19px; font-weight: 700; color: var(--text-primary); line-height: 1.35; }
+.card-delete {
+  border: 0; background: transparent; color: var(--text-tertiary);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; opacity: 0.6; flex-shrink: 0;
+}
+.card-delete:hover { opacity: 1; color: var(--danger); }
 .field-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 8px; display: block; }
 .field { margin-bottom: 18px; }
 
@@ -174,7 +181,10 @@ body::before {
   </div>
 
   <div class="card" id="flashcardView" style="display:none">
-    <div class="card-title" id="cardTitle"></div>
+    <div class="card-header">
+      <div class="card-title" id="cardTitle"></div>
+      <button type="button" class="card-delete" id="deleteBtn" aria-label="Delete this task">×</button>
+    </div>
 
     <div class="field">
       <label class="field-label">Life Domain</label>
@@ -391,6 +401,21 @@ body::before {
     showView('learned');
   }
 
+  // Unlike submitCard(), deleting isn't a training event — it doesn't touch
+  // sessionCount or the "Learned" interstitial, it just removes the task
+  // and moves straight to whatever's next. queue is a frozen snapshot (see
+  // the comment in whenReady below), so removing the task from storage
+  // alone wouldn't update this view — splice it out of queue too, at the
+  // current idx, and deliberately do NOT increment idx: the next task has
+  // just shifted into this same position.
+  function deleteCurrentCard() {
+    const task = queue[idx];
+    if (!task) return;
+    window.Tasks.removeTask(task.id);
+    queue.splice(idx, 1);
+    renderCard();
+  }
+
   function wireStaticControls() {
     document.querySelectorAll('#recurringGrid .pill-btn').forEach(b => {
       b.addEventListener('click', () => { sel.recurring = b.dataset.r; renderRecurringGrid(); });
@@ -405,6 +430,7 @@ body::before {
     $('detailsInput').addEventListener('change', () => { sel.details = $('detailsInput').value; });
     $('confirmBtn').addEventListener('click', submitCard);
     $('continueBtn').addEventListener('click', renderCard);
+    $('deleteBtn').addEventListener('click', deleteCurrentCard);
   }
 
   whenReady(function () {
