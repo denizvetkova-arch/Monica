@@ -300,6 +300,25 @@ body::after {
   transition: background 0.15s, color 0.15s; margin-right: 6px;
 }
 .reclassify-row-btn:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+
+/* ===== Auto-classify toggle ===== */
+.auto-classify-row {
+  display: flex; align-items: center; gap: 10px; margin: 12px 0;
+  cursor: pointer; user-select: none;
+}
+.auto-classify-row input { position: absolute; opacity: 0; width: 0; height: 0; }
+.auto-classify-switch {
+  position: relative; width: 38px; height: 22px; flex-shrink: 0;
+  background: rgba(255,255,255,0.12); border-radius: 999px;
+  transition: background 0.15s;
+}
+.auto-classify-switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--text-primary); transition: transform 0.15s;
+}
+.auto-classify-row input:checked + .auto-classify-switch { background: var(--success); }
+.auto-classify-row input:checked + .auto-classify-switch::after { transform: translateX(16px); }
+.auto-classify-label { font-size: 12.5px; color: var(--text-secondary); }
 </style>
 </head>
 <body>
@@ -317,13 +336,19 @@ body::after {
   <div class="card">
     <div class="section-title">Bulk Add</div>
     <textarea class="bulk-textarea" id="bulkInput" placeholder="Paste your whole to-do list here, one task per line…"></textarea>
-    <div class="bulk-hint">Each line becomes a task — AI classifies category, ROI, urgency, difficulty, and estimated time automatically (a few seconds per task). Refine any of it below if it's wrong.</div>
+    <div class="bulk-hint" id="bulkHint">Each line becomes a task.</div>
+    <label class="auto-classify-row">
+      <input type="checkbox" id="autoClassifyToggle">
+      <span class="auto-classify-switch"></span>
+      <span class="auto-classify-label">Auto-classify new tasks with AI when added</span>
+    </label>
     <button class="btn-primary" id="bulkAddBtn" type="button">Add All Lines</button>
   </div>
 
   <div class="card">
     <div class="section-title">Reclassify</div>
     <div class="bulk-hint" id="reclassifyHint">Checking…</div>
+    <div class="bulk-hint">Runs any time, regardless of the auto-classify setting above — use this to classify tasks on demand, then correct anything Monica gets wrong from the row below or a <a href="train.html" style="color:var(--text-primary);">Training Session</a>.</div>
     <button class="btn-secondary-wide" id="reclassifyBtn" type="button" disabled>Reclassify Entire Database</button>
     <div class="reclassify-progress" id="reclassifyProgress" style="display:none">
       <div class="reclassify-progress-bar"><div class="reclassify-progress-fill" id="reclassifyFill"></div></div>
@@ -414,6 +439,20 @@ body::after {
       const v = JSON.parse(localStorage.getItem('life_context_v1'));
       return typeof v === 'string' ? v : '';
     } catch (e) { return ''; }
+  }
+
+  // Off by default — new tasks stay unclassified (default category/ROI/
+  // etc.) until manually run through Reclassify or a Training Session.
+  // Its own sync channel (like life_context) so flipping it doesn't ride
+  // along with, or get overwritten by, every task edit — api/todos.js and
+  // api/ask.js upsert the 'tasks' row's ENTIRE data payload as just
+  // {tasks_v1: [...]}, which would silently wipe this out if it were
+  // stored in that same row instead.
+  function loadAutoClassifyEnabled() {
+    try { return JSON.parse(localStorage.getItem('auto_classify_v1')) === true; } catch (e) { return false; }
+  }
+  function saveAutoClassifyEnabled(v) {
+    try { localStorage.setItem('auto_classify_v1', JSON.stringify(!!v)); } catch (e) {}
   }
 
   function whenTasksReady(fn) {
@@ -972,13 +1011,33 @@ body::after {
     await Promise.all(workers);
   }
 
+  function renderBulkHint() {
+    const enabled = loadAutoClassifyEnabled();
+    $('autoClassifyToggle').checked = enabled;
+    $('bulkHint').textContent = enabled
+      ? 'Each line becomes a task — AI classifies category, ROI, urgency, difficulty, and estimated time automatically (a few seconds per task). Refine any of it below if it\'s wrong.'
+      : 'Each line becomes a task with default values (personal / medium / ROI 5 / urgency 5) — turn on auto-classify below, or use Reclassify, to have AI fill these in.';
+  }
+
+  function wireAutoClassifyToggle() {
+    $('autoClassifyToggle').addEventListener('change', (e) => {
+      saveAutoClassifyEnabled(e.target.checked);
+      renderBulkHint();
+    });
+  }
+
   function wireBulkAdd() {
     $('bulkAddBtn').addEventListener('click', () => {
       const lines = $('bulkInput').value.split('\n').map(l => l.trim()).filter(Boolean);
       const added = lines.map(title => window.Tasks.addTask({ title }));
       $('bulkInput').value = '';
       renderList();
-      classifyQueue(added.map(t => ({ id: t.id, title: t.title, details: t.details })));
+      // Manual triggers (per-row "↻ Reclassify" and "Reclassify Entire
+      // Database") always work regardless of this setting — it only gates
+      // the automatic call that used to fire silently on every add.
+      if (loadAutoClassifyEnabled()) {
+        classifyQueue(added.map(t => ({ id: t.id, title: t.title, details: t.details })));
+      }
     });
   }
 
@@ -1046,11 +1105,14 @@ body::after {
     wireBulkAdd();
     wireFeedbackModal();
     wireReclassify();
+    wireAutoClassifyToggle();
+    renderBulkHint();
     renderList();
     window.addEventListener('tasks-changed', renderList);
     window.addEventListener('storage', renderList);
     if (typeof initCloudSync === 'function') {
       initCloudSync({ appKey: 'tasks', syncedKeys: ['tasks_v1'], onApplied: renderList });
+      initCloudSync({ appKey: 'classification_settings', syncedKeys: ['auto_classify_v1'], onApplied: renderBulkHint });
     }
   });
 })();
